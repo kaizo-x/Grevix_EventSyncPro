@@ -74,7 +74,9 @@ function errorMessage(error: unknown): string {
  *   The server is idempotent, so retries after a lost response are always safe.
  */
 export function useNetworkSync() {
-  const [browserOnline, setBrowserOnline] = useState(true);
+  const [browserOnline, setBrowserOnline] = useState(() => {
+    return typeof navigator !== "undefined" ? navigator.onLine : true;
+  });
   const [simulatedOffline, setSimulatedOffline] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -83,8 +85,16 @@ export function useNetworkSync() {
   /** Bumps whenever local check-in data may have changed, so views can re-read IndexedDB. */
   const [version, setVersion] = useState(0);
   const [installPrompt, setInstallPrompt] =
-    useState<BeforeInstallPromptEvent | null>(null);
-  const [isInstalled, setIsInstalled] = useState(false);
+    useState<BeforeInstallPromptEvent | null>(() => {
+      return typeof window !== "undefined" ? window.__deferredInstallPrompt ?? null : null;
+    });
+  const [isInstalled, setIsInstalled] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return (
+      window.matchMedia("(display-mode: standalone)").matches ||
+      (navigator as Navigator & { standalone?: boolean }).standalone === true
+    );
+  });
 
   const isOnline = browserOnline && !simulatedOffline;
 
@@ -325,7 +335,6 @@ export function useNetworkSync() {
 
   /** Mirror the browser's connectivity events. */
   useEffect(() => {
-    setBrowserOnline(navigator.onLine);
     const goOnline = () => setBrowserOnline(true);
     const goOffline = () => setBrowserOnline(false);
     window.addEventListener("online", goOnline);
@@ -339,14 +348,6 @@ export function useNetworkSync() {
 
   /** PWA install: capture Chrome's prompt so we can offer our own "Install App" button. */
   useEffect(() => {
-    const standalone =
-      window.matchMedia("(display-mode: standalone)").matches ||
-      (navigator as Navigator & { standalone?: boolean }).standalone === true;
-    setIsInstalled(standalone);
-
-    if (window.__deferredInstallPrompt)
-      setInstallPrompt(window.__deferredInstallPrompt);
-
     const onBeforeInstall = (event: Event) => {
       event.preventDefault();
       window.__deferredInstallPrompt = event as BeforeInstallPromptEvent;

@@ -9,34 +9,27 @@ import {
   AlertTriangle,
   ArrowRight,
   BookmarkCheck,
+  Building2,
   Calendar,
   CalendarPlus,
   CheckCircle2,
-  ChevronRight,
   Clock,
   Compass,
   Download,
   ExternalLink,
   GraduationCap,
-  Layers,
-  ListFilter,
   Loader2,
   Lock,
   LogOut,
   MapPin,
   QrCode,
-  Radio,
   RefreshCw,
   Search,
-  Share2,
-  ShieldAlert,
   ShieldCheck,
   Sparkles,
   Tag,
   Ticket,
   Trophy,
-  User,
-  UserCheck,
   Wifi,
   WifiOff,
   Zap,
@@ -51,10 +44,8 @@ import {
   saveStudentApplication,
   updateApplicationStatus,
   type ApplicationStatus,
-  type CheckinStatus,
   type EventCategory,
   type EventItem,
-  type EventMode,
   type OpportunitySource,
   type PendingCheckin,
   type RegionGroup,
@@ -92,11 +83,10 @@ const CATEGORIES: ("All" | EventCategory)[] = [
 const SOURCES: ("All" | OpportunitySource)[] = [
   "All",
   "Unstop",
-  "Devfolio",
-  "HackerEarth",
-  "Campus",
   "SIH Portal",
-  "Virtual",
+  "Devfolio",
+  "AWS User Group",
+  "Google Developers",
 ];
 
 type RegionFilter = "All India" | Exclude<RegionGroup, "Other India">;
@@ -109,10 +99,12 @@ const REGIONS: RegionFilter[] = [
 
 const SOURCE_BADGES: Record<OpportunitySource, { bg: string; text: string; border: string }> = {
   Unstop: { bg: "bg-blue-500/15", text: "text-blue-400", border: "border-blue-500/30" },
-  Devfolio: { bg: "bg-cyan-500/15", text: "text-cyan-300", border: "border-cyan-500/30" },
-  HackerEarth: { bg: "bg-purple-500/15", text: "text-purple-300", border: "border-purple-500/30" },
-  Campus: { bg: "bg-emerald-500/15", text: "text-emerald-400", border: "border-emerald-500/30" },
   "SIH Portal": { bg: "bg-amber-500/15", text: "text-amber-400", border: "border-amber-500/30" },
+  Devfolio: { bg: "bg-cyan-500/15", text: "text-cyan-300", border: "border-cyan-500/30" },
+  "AWS User Group": { bg: "bg-orange-500/15", text: "text-orange-300", border: "border-orange-500/30" },
+  "Google Developers": { bg: "bg-emerald-500/15", text: "text-emerald-300", border: "border-emerald-500/30" },
+  HackerEarth: { bg: "bg-purple-500/15", text: "text-purple-300", border: "border-purple-500/30" },
+  Campus: { bg: "bg-violet-500/15", text: "text-violet-400", border: "border-violet-500/30" },
   Virtual: { bg: "bg-indigo-500/15", text: "text-indigo-300", border: "border-indigo-500/30" },
 };
 
@@ -319,11 +311,26 @@ export default function Home() {
   const { isOnline, version } = net;
 
   // Student Authentication State (Persists offline via localStorage)
-  const [student, setStudent] = useState<StudentProfile | null>(null);
-  const [authInitialized, setAuthInitialized] = useState(false);
+  const [student, setStudent] = useState<StudentProfile | null>(() => {
+    if (typeof window === "undefined") return null;
+    try {
+      const stored = localStorage.getItem(STUDENT_SESSION_KEY);
+      return stored ? (JSON.parse(stored) as StudentProfile) : null;
+    } catch {
+      return null;
+    }
+  });
+  const [authInitialized] = useState(true);
 
   // Tab State: [1. Opportunity Aggregator], [2. My Applications & Tracker], [3. Venue Offline Check-In]
-  const [tab, setTab] = useState<Tab>("aggregator");
+  const [tab, setTab] = useState<Tab>(() => {
+    if (typeof window === "undefined") return "aggregator";
+    const requested = new URLSearchParams(window.location.search).get("tab");
+    if (requested === "aggregator" || requested === "tracker" || requested === "checkin") {
+      return requested as Tab;
+    }
+    return "aggregator";
+  });
 
   // Core Data
   const [events, setEvents] = useState<EventItem[]>([]);
@@ -331,19 +338,6 @@ export default function Home() {
   const [applications, setApplications] = useState<StudentApplication[]>([]);
   const [wallet, setWallet] = useState<PendingCheckin[]>([]);
   const [preselectedEventId, setPreselectedEventId] = useState("");
-
-  // Load student session from offline storage on mount
-  useEffect(() => {
-    try {
-      const stored = localStorage.getItem(STUDENT_SESSION_KEY);
-      if (stored) {
-        setStudent(JSON.parse(stored) as StudentProfile);
-      }
-    } catch {
-      // Best effort
-    }
-    setAuthInitialized(true);
-  }, []);
 
   const handleLogin = (profile: StudentProfile) => {
     setStudent(profile);
@@ -437,7 +431,7 @@ export default function Home() {
     } catch {
       setApplications([]);
     }
-  }, [student?.rollNoOrEmail]);
+  }, [student]);
 
   useEffect(() => {
     void refreshApplications();
@@ -463,14 +457,6 @@ export default function Home() {
   useEffect(() => {
     if (process.env.NODE_ENV === "production" && "serviceWorker" in navigator) {
       navigator.serviceWorker.register("/sw.js").catch(() => undefined);
-    }
-  }, []);
-
-  // Handle URL tabs (?tab=aggregator | ?tab=tracker | ?tab=checkin)
-  useEffect(() => {
-    const requested = new URLSearchParams(window.location.search).get("tab");
-    if (requested === "aggregator" || requested === "tracker" || requested === "checkin") {
-      setTab(requested as Tab);
     }
   }, []);
 
@@ -787,12 +773,12 @@ function StudentAuthPortal({
   simulated: boolean;
   toggleSimulated: () => void;
 }) {
-  const [fullName, setFullName] = useState("Aarav Sharma");
-  const [collegeName, setCollegeName] = useState("Veermata Jijabai Technological Institute (VJTI)");
-  const [rollNoOrEmail, setRollNoOrEmail] = useState("aarav.sharma@vjti.ac.in");
-  const [password, setPassword] = useState("student@2026");
-  const [degreeBranch, setDegreeBranch] = useState("B.Tech Computer Engineering");
-  const [yearOfStudy, setYearOfStudy] = useState("3rd Year");
+  const [fullName, setFullName] = useState("");
+  const [collegeName, setCollegeName] = useState("");
+  const [rollNoOrEmail, setRollNoOrEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [degreeBranch, setDegreeBranch] = useState("");
+  const [yearOfStudy, setYearOfStudy] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   const handleSubmit = (e: FormEvent) => {
@@ -814,32 +800,9 @@ function StudentAuthPortal({
       fullName: fullName.trim(),
       collegeName: collegeName.trim(),
       rollNoOrEmail: rollNoOrEmail.trim().toLowerCase(),
-      degreeBranch,
-      yearOfStudy,
+      degreeBranch: degreeBranch.trim() || "Undergraduate Engineering",
+      yearOfStudy: yearOfStudy.trim() || "Current Student",
     });
-  };
-
-  const fillQuickDemo = (profileName: "VJTI" | "COEP" | "IITB") => {
-    if (profileName === "VJTI") {
-      setFullName("Aarav Sharma");
-      setCollegeName("VJTI Mumbai");
-      setRollNoOrEmail("aarav.sharma@vjti.ac.in");
-      setDegreeBranch("B.Tech Computer Science");
-      setYearOfStudy("3rd Year");
-    } else if (profileName === "COEP") {
-      setFullName("Pooja Kulkarni");
-      setCollegeName("COEP Technological University, Pune");
-      setRollNoOrEmail("pooja.k@coep.ac.in");
-      setDegreeBranch("B.Tech Artificial Intelligence");
-      setYearOfStudy("4th Year");
-    } else {
-      setFullName("Rohan Deshmukh");
-      setCollegeName("IIT Bombay");
-      setRollNoOrEmail("rohan.d@iitb.ac.in");
-      setDegreeBranch("B.Tech Electrical Engineering");
-      setYearOfStudy("2nd Year");
-    }
-    setError(null);
   };
 
   return (
@@ -849,7 +812,7 @@ function StudentAuthPortal({
       {/* Network Simulator toggle in login screen */}
       <div className="mb-6 flex items-center gap-3 rounded-full border border-slate-800 bg-slate-900/90 px-4 py-1.5 text-xs text-slate-300">
         <span className={clsx("h-2 w-2 rounded-full", isOnline ? "bg-emerald-400" : "bg-amber-400")} />
-        <span>{isOnline ? "Network Online" : simulated ? "Offline (Simulated Outage)" : "Offline"}</span>
+        <span>{isOnline ? "Network Online" : simulated ? "Offline (Simulated Outage)" : "Offline (Local Engine)"}</span>
         <button
           type="button"
           onClick={toggleSimulated}
@@ -868,38 +831,8 @@ function StudentAuthPortal({
             Student Opportunity Portal
           </h1>
           <p className="mt-1 text-sm text-slate-400">
-            Sign in to track Unstop, Devfolio & SIH applications with offline Dexie sync.
+            Sign in with your verified student identity to apply, track, and generate offline venue passes.
           </p>
-        </div>
-
-        {/* Demo Fast Fill Buttons */}
-        <div className="mt-6">
-          <p className="text-center text-xs font-medium text-slate-500 uppercase tracking-wider">
-            Quick Fill Demo Profiles:
-          </p>
-          <div className="mt-2 flex justify-center gap-2">
-            <button
-              type="button"
-              onClick={() => fillQuickDemo("VJTI")}
-              className="rounded-lg border border-slate-800 bg-slate-950 px-2.5 py-1 text-xs text-slate-300 hover:border-indigo-500 hover:text-white"
-            >
-              VJTI (Aarav)
-            </button>
-            <button
-              type="button"
-              onClick={() => fillQuickDemo("COEP")}
-              className="rounded-lg border border-slate-800 bg-slate-950 px-2.5 py-1 text-xs text-slate-300 hover:border-indigo-500 hover:text-white"
-            >
-              COEP (Pooja)
-            </button>
-            <button
-              type="button"
-              onClick={() => fillQuickDemo("IITB")}
-              className="rounded-lg border border-slate-800 bg-slate-950 px-2.5 py-1 text-xs text-slate-300 hover:border-indigo-500 hover:text-white"
-            >
-              IIT Bombay (Rohan)
-            </button>
-          </div>
         </div>
 
         <form onSubmit={handleSubmit} className="mt-6 space-y-4">
@@ -1015,9 +948,7 @@ function StudentAuthPortal({
 
 function AggregatorTab({
   events,
-  source,
   isOnline,
-  student,
   appliedEventIds,
   onSaveApplication,
   onCheckin,
@@ -1058,13 +989,13 @@ function AggregatorTab({
           <div>
             <div className="inline-flex items-center gap-2 rounded-full border border-indigo-500/30 bg-indigo-500/10 px-3 py-1 text-xs font-semibold text-indigo-300">
               <Sparkles className="h-3.5 w-3.5" />
-              <span>Real-Time Student Hackathon & Opportunity Aggregator</span>
+              <span>100% Real & Verifiable Student Initiatives</span>
             </div>
             <h2 className="mt-2 text-xl font-bold text-white sm:text-2xl">
-              Discover & Track Hackathons across India & Global
+              Verified Student Hackathons & Conferences
             </h2>
             <p className="mt-1 text-sm text-slate-400">
-              Aggregated directly from Unstop, Devfolio, HackerEarth, SIH Portal & top university fests. Saved offline for instant verification.
+              Directly curated from Unstop, SIH Portal, Devfolio, AWS User Group India, and Google Developers.
             </p>
           </div>
 
@@ -1077,6 +1008,33 @@ function AggregatorTab({
               <CalendarPlus className="h-4 w-4 text-indigo-400" />
               <span>Export All to Calendar (.ics)</span>
             </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Campus Fest Partner Program Dedicated Banner */}
+      <div className="relative overflow-hidden rounded-2xl border border-violet-500/30 bg-gradient-to-r from-violet-950/30 via-slate-900 to-slate-900 p-5 shadow-sm">
+        <div className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center">
+          <div className="flex items-start gap-3.5">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-violet-600/20 border border-violet-500/30 text-violet-300">
+              <Building2 className="h-5 w-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-bold text-white">Campus Fest Partner Program</h3>
+                <span className="rounded-full bg-violet-500/15 border border-violet-500/30 px-2 py-0.5 text-[10px] font-semibold text-violet-300">
+                  Institutional Verification
+                </span>
+              </div>
+              <p className="mt-1 text-xs text-slate-400 leading-relaxed max-w-3xl">
+                To maintain 100% authenticity and prevent unverified listings, intercollegiate college fests are onboarded strictly via official college administration credentials and authenticated faculty innovation cell letters.
+              </p>
+            </div>
+          </div>
+          <div className="shrink-0">
+            <span className="inline-flex items-center gap-1.5 rounded-lg border border-slate-800 bg-slate-950 px-3 py-1.5 text-xs font-medium text-slate-400">
+              Verified Onboarding Open for 2026
+            </span>
           </div>
         </div>
       </div>
@@ -1182,7 +1140,7 @@ function AggregatorTab({
           <Trophy className="mx-auto h-10 w-10 text-slate-600" />
           <h3 className="mt-3 text-base font-semibold text-slate-200">No opportunities match your filter</h3>
           <p className="mt-1 text-sm text-slate-400">
-            Try resetting your search query or switching source badges back to "All".
+            Try resetting your search query or switching source badges back to &quot;All&quot;.
           </p>
           <button
             type="button"
@@ -1286,21 +1244,21 @@ function AggregatorTab({
                   </div>
                 </div>
 
-                {/* Card Action Buttons */}
-                <div className="mt-6 flex flex-wrap items-center justify-between gap-2 border-t border-slate-800/60 pt-4">
-                  {/* Left: Apply Link */}
+                {/* Card Action Buttons: Dual-Action + Calendar */}
+                <div className="mt-6 flex flex-wrap items-center justify-between gap-2.5 border-t border-slate-800/60 pt-4">
+                  {/* Action 1: Apply on Host Site */}
                   <a
                     href={event.applyUrl}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-indigo-600 to-indigo-500 px-3.5 py-2 text-xs font-semibold text-white shadow-sm transition hover:from-indigo-500 hover:to-indigo-400"
                   >
-                    <span>Apply on {event.sourceBadge}</span>
+                    <span>Apply on Host Site ({event.sourceBadge})</span>
                     <ExternalLink className="h-3.5 w-3.5" />
                   </a>
 
-                  {/* Right: Save to Tracker & Offline Pass button */}
-                  <div className="flex items-center gap-2">
+                  {/* Action 2 & 3: Track in My Profile + Add to Calendar */}
+                  <div className="flex flex-wrap items-center gap-2">
                     <button
                       type="button"
                       onClick={() => onSaveApplication(event)}
@@ -1312,22 +1270,22 @@ function AggregatorTab({
                       )}
                     >
                       <BookmarkCheck className="h-3.5 w-3.5" />
-                      <span>{isSaved ? "Saved in Tracker" : "Save to Tracker"}</span>
+                      <span>{isSaved ? "Tracked in My Profile" : "Track in My Profile"}</span>
                     </button>
 
                     <button
                       type="button"
                       onClick={() => exportBatchICS([event], `${slugify(event.title)}.ics`)}
-                      title="Download .ics Calendar Event"
-                      className="rounded-xl border border-slate-800 bg-slate-950 p-2 text-slate-400 transition hover:border-slate-700 hover:text-slate-200"
+                      className="inline-flex items-center gap-1.5 rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-xs font-medium text-slate-300 transition hover:border-slate-700 hover:text-white"
                     >
-                      <Calendar className="h-3.5 w-3.5" />
+                      <Calendar className="h-3.5 w-3.5 text-indigo-400" />
+                      <span>Add to Calendar</span>
                     </button>
 
                     <button
                       type="button"
                       onClick={() => onCheckin(event.id)}
-                      title="Generate offline verification pass"
+                      title="Generate offline venue verification pass"
                       className="rounded-xl border border-indigo-500/30 bg-indigo-950/40 p-2 text-indigo-300 transition hover:bg-indigo-900/60"
                     >
                       <QrCode className="h-3.5 w-3.5" />
@@ -1455,7 +1413,7 @@ function TrackerTab({
           <BookmarkCheck className="mx-auto h-10 w-10 text-slate-600" />
           <h3 className="mt-3 text-base font-semibold text-slate-200">No applications found in this view</h3>
           <p className="mt-1 text-sm text-slate-400">
-            Head to the Opportunity Aggregator tab to explore hackathons and click "Save to Tracker".
+            Head to the Opportunity Aggregator tab to explore hackathons and click &quot;Save to Tracker&quot;.
           </p>
         </div>
       ) : (
@@ -1619,20 +1577,7 @@ function VenueCheckinTab({
     [events],
   );
 
-  useEffect(() => {
-    if (preselectedEventId) setEventId(preselectedEventId);
-  }, [preselectedEventId]);
-
-  useEffect(() => {
-    if (!eventId && sortedEvents.length > 0) setEventId(sortedEvents[0].id);
-  }, [eventId, sortedEvents]);
-
-  useEffect(() => {
-    if (student) {
-      if (!attendeeName) setAttendeeName(student.fullName);
-      if (!attendeeEmail) setAttendeeEmail(student.rollNoOrEmail);
-    }
-  }, [student, attendeeName, attendeeEmail]);
+  const effectiveEventId = eventId || preselectedEventId || (sortedEvents.length > 0 ? sortedEvents[0].id : "");
 
   const livePass = useMemo(() => {
     if (activeKey) {
@@ -1648,7 +1593,7 @@ function VenueCheckinTab({
 
     const name = attendeeName.trim();
     const email = attendeeEmail.trim();
-    if (!eventId) return setError("Please select an event to generate a venue pass.");
+    if (!effectiveEventId) return setError("Please select an event to generate a venue pass.");
     if (name.length < 2) return setError("Please enter your full name.");
     if (!EMAIL_RE.test(email)) {
       return setError("Please provide a valid email format (e.g. rollno@college.edu or student@example.com).");
@@ -1657,7 +1602,7 @@ function VenueCheckinTab({
     setSubmitting(true);
     try {
       const { checkin, existed } = await enqueueCheckin({
-        eventId,
+        eventId: effectiveEventId,
         attendeeName: name,
         attendeeEmail: email,
       });
@@ -1706,7 +1651,7 @@ function VenueCheckinTab({
                 Select Hackathon / Event
               </label>
               <select
-                value={eventId}
+                value={effectiveEventId}
                 onChange={(e) => setEventId(e.target.value)}
                 className="mt-1.5 w-full rounded-xl border border-slate-800 bg-slate-950 px-3.5 py-2.5 text-sm text-slate-100 focus:border-indigo-500 focus:outline-none"
               >
