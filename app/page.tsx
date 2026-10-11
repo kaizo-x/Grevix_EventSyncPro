@@ -7,38 +7,59 @@ import confetti from "canvas-confetti";
 import { QRCodeSVG } from "qrcode.react";
 import {
   AlertTriangle,
-  BarChart3,
+  ArrowRight,
+  BookmarkCheck,
+  Calendar,
   CalendarPlus,
   CheckCircle2,
+  ChevronRight,
   Clock,
   Compass,
   Download,
-  Globe,
+  ExternalLink,
+  GraduationCap,
+  Layers,
+  ListFilter,
   Loader2,
+  Lock,
+  LogOut,
   MapPin,
+  QrCode,
   Radio,
   RefreshCw,
   Search,
+  Share2,
+  ShieldAlert,
   ShieldCheck,
   Sparkles,
+  Tag,
   Ticket,
+  Trophy,
+  User,
   UserCheck,
-  Users,
   Wifi,
   WifiOff,
+  Zap,
 } from "lucide-react";
 import {
   buildSeedEvents,
   cacheEvents,
   db,
   getCachedEvents,
-  type AnalyticsSnapshot,
+  getStudentApplications,
+  removeStudentApplication,
+  saveStudentApplication,
+  updateApplicationStatus,
+  type ApplicationStatus,
   type CheckinStatus,
   type EventCategory,
   type EventItem,
   type EventMode,
+  type OpportunitySource,
   type PendingCheckin,
   type RegionGroup,
+  type StudentApplication,
+  type StudentProfile,
 } from "@/lib/db";
 import {
   useNetworkSync,
@@ -47,16 +68,16 @@ import {
 } from "@/hooks/useNetworkSync";
 
 /* -------------------------------------------------------------------------- */
-/*  Constants and small helpers                                               */
+/*  Constants & Small Helpers                                                 */
 /* -------------------------------------------------------------------------- */
 
-type Tab = "discover" | "checkin" | "dashboard";
+type Tab = "aggregator" | "tracker" | "checkin";
 type EventsSource = "network" | "cache" | "bundled";
 
-const TABS: { id: Tab; label: string; icon: typeof Compass }[] = [
-  { id: "discover", label: "Discover Events", icon: Compass },
-  { id: "checkin", label: "Offline Check-In Terminal", icon: UserCheck },
-  { id: "dashboard", label: "Organizer Dashboard", icon: BarChart3 },
+const TABS: { id: Tab; label: string; icon: typeof Compass; badge?: string }[] = [
+  { id: "aggregator", label: "Opportunity Aggregator", icon: Compass },
+  { id: "tracker", label: "My Applications & Tracker", icon: BookmarkCheck },
+  { id: "checkin", label: "Venue Offline Check-In", icon: QrCode },
 ];
 
 const CATEGORIES: ("All" | EventCategory)[] = [
@@ -67,7 +88,16 @@ const CATEGORIES: ("All" | EventCategory)[] = [
   "Fests",
   "Meetups",
 ];
-const MODES: ("All" | EventMode)[] = ["All", "Online", "In-Person", "Hybrid"];
+
+const SOURCES: ("All" | OpportunitySource)[] = [
+  "All",
+  "Unstop",
+  "Devfolio",
+  "HackerEarth",
+  "Campus",
+  "SIH Portal",
+  "Virtual",
+];
 
 type RegionFilter = "All India" | Exclude<RegionGroup, "Other India">;
 const REGIONS: RegionFilter[] = [
@@ -77,29 +107,50 @@ const REGIONS: RegionFilter[] = [
   "Virtual / Global",
 ];
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
-const ANALYTICS_CACHE_KEY = "grevix:analytics:v1";
-
-const CATEGORY_STYLES: Record<EventCategory, string> = {
-  Hackathons: "border-indigo-500/40 bg-indigo-500/10 text-indigo-300",
-  Workshops: "border-sky-500/40 bg-sky-500/10 text-sky-300",
-  Conferences: "border-violet-500/40 bg-violet-500/10 text-violet-300",
-  Fests: "border-fuchsia-500/40 bg-fuchsia-500/10 text-fuchsia-300",
-  Meetups: "border-teal-500/40 bg-teal-500/10 text-teal-300",
+const SOURCE_BADGES: Record<OpportunitySource, { bg: string; text: string; border: string }> = {
+  Unstop: { bg: "bg-blue-500/15", text: "text-blue-400", border: "border-blue-500/30" },
+  Devfolio: { bg: "bg-cyan-500/15", text: "text-cyan-300", border: "border-cyan-500/30" },
+  HackerEarth: { bg: "bg-purple-500/15", text: "text-purple-300", border: "border-purple-500/30" },
+  Campus: { bg: "bg-emerald-500/15", text: "text-emerald-400", border: "border-emerald-500/30" },
+  "SIH Portal": { bg: "bg-amber-500/15", text: "text-amber-400", border: "border-amber-500/30" },
+  Virtual: { bg: "bg-indigo-500/15", text: "text-indigo-300", border: "border-indigo-500/30" },
 };
 
-const DEMO_NAMES = [
-  "Aarav Mehta",
-  "Diya Nair",
-  "Kabir Shah",
-  "Ananya Iyer",
-  "Rohan Desai",
-  "Meera Kulkarni",
-  "Vihaan Rao",
-  "Ishita Verma",
-];
+const STATUS_CONFIG: Record<
+  ApplicationStatus,
+  { bg: string; text: string; border: string; desc: string }
+> = {
+  "Applied / Registered": {
+    bg: "bg-sky-500/15",
+    text: "text-sky-300",
+    border: "border-sky-500/30",
+    desc: "Application submitted to host platform",
+  },
+  Shortlisted: {
+    bg: "bg-amber-500/15",
+    text: "text-amber-400",
+    border: "border-amber-500/30",
+    desc: "Round 1 passed, team shortlisted for finals",
+  },
+  "Offline Pass Ready": {
+    bg: "bg-emerald-500/15",
+    text: "text-emerald-400",
+    border: "border-emerald-500/30",
+    desc: "Pass verified locally, ready for venue entry",
+  },
+  Attended: {
+    bg: "bg-indigo-500/15",
+    text: "text-indigo-300",
+    border: "border-indigo-500/30",
+    desc: "Verified check-in acknowledged by server",
+  },
+};
 
+const STUDENT_SESSION_KEY = "grevix_student_session_v1";
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const IST = "Asia/Kolkata";
+
 const dateFmt = new Intl.DateTimeFormat("en-IN", {
   weekday: "short",
   day: "numeric",
@@ -118,7 +169,6 @@ const inrFmt = new Intl.NumberFormat("en-IN", {
   maximumFractionDigits: 0,
 });
 
-/** Time of day in IST, e.g. "6:30 pm IST". */
 function fmtTime(iso: string): string {
   return `${timeFmt.format(new Date(iso))} IST`;
 }
@@ -140,12 +190,6 @@ function formatFee(feeInINR: number): string {
   return feeInINR === 0 ? "Free" : `${inrFmt.format(feeInINR)} registration`;
 }
 
-function formatDelay(seconds: number): string {
-  if (seconds < 90) return `${seconds}s`;
-  if (seconds < 5400) return `${Math.round(seconds / 60)} min`;
-  return `${(seconds / 3600).toFixed(1)} h`;
-}
-
 function shortHash(hash: string): string {
   return hash.length > 20 ? `${hash.slice(0, 12)}...${hash.slice(-8)}` : hash;
 }
@@ -158,13 +202,12 @@ function slugify(text: string): string {
 }
 
 /* -------------------------------------------------------------------------- */
-/*  Calendar (.ics) generation. Pure client code, so it works offline.        */
+/*  Dynamic Calendar (.ics) Generation (Single and Bulk)                     */
 /* -------------------------------------------------------------------------- */
 
 const pad = (n: number) => String(n).padStart(2, "0");
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 
-/** UTC form, used only for DTSTAMP. */
 function toICSDateUTC(iso: string): string {
   const d = new Date(iso);
   return `${d.getUTCFullYear()}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}T${pad(d.getUTCHours())}${pad(
@@ -172,7 +215,6 @@ function toICSDateUTC(iso: string): string {
   )}${pad(d.getUTCSeconds())}Z`;
 }
 
-/** India Standard Time wall-clock form (UTC+05:30), e.g. 20261015T183000. Used with TZID=Asia/Kolkata. */
 function toICSDateIST(iso: string): string {
   const d = new Date(new Date(iso).getTime() + IST_OFFSET_MS);
   return `${d.getUTCFullYear()}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}T${pad(d.getUTCHours())}${pad(
@@ -188,7 +230,6 @@ function escapeICS(text: string): string {
     .replace(/\r?\n/g, "\\n");
 }
 
-/** RFC 5545 line folding (kept under 75 octets with headroom for multi-byte characters such as the rupee sign). */
 function foldLine(line: string): string {
   const chunks: string[] = [];
   let rest = line;
@@ -200,12 +241,36 @@ function foldLine(line: string): string {
   return chunks.join("\r\n");
 }
 
-function generateICS(event: EventItem): string {
+function generateSingleVEvent(event: EventItem): string[] {
   const fee = event.feeInINR === 0 ? "Free" : inrFmt.format(event.feeInINR);
+  return [
+    "BEGIN:VEVENT",
+    `UID:${event.id}@eventsyncpro-student`,
+    `DTSTAMP:${toICSDateUTC(new Date().toISOString())}`,
+    `DTSTART;TZID=Asia/Kolkata:${toICSDateIST(event.startsAt)}`,
+    `DTEND;TZID=Asia/Kolkata:${toICSDateIST(event.endsAt)}`,
+    `SUMMARY:${escapeICS(event.title)}`,
+    `DESCRIPTION:${escapeICS(
+      `${event.description}\n\nHost: ${event.sourceBadge} (${event.platform ?? "Platform"})\nPrize Pool: ${event.prizePool ?? "Standard"}\nRegistration: ${fee}\nDirect Link: ${event.applyUrl}`,
+    )}`,
+    `LOCATION:${escapeICS(`${event.location}, ${event.city}`)}`,
+    `CATEGORIES:${escapeICS(event.category)}`,
+    "STATUS:CONFIRMED",
+    "BEGIN:VALARM",
+    "TRIGGER:-PT30M",
+    "ACTION:DISPLAY",
+    `DESCRIPTION:${escapeICS(`${event.title} begins in 30 minutes!`)}`,
+    "END:VALARM",
+    "END:VEVENT",
+  ];
+}
+
+function exportBatchICS(events: EventItem[], filename = "My_Student_Applications.ics") {
+  if (events.length === 0) return;
   const lines = [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
-    "PRODID:-//Grevix//EventSync India//EN",
+    "PRODID:-//Grevix//EventSyncPro Student Aggregator//EN",
     "CALSCALE:GREGORIAN",
     "METHOD:PUBLISH",
     "X-WR-TIMEZONE:Asia/Kolkata",
@@ -218,37 +283,21 @@ function generateICS(event: EventItem): string {
     "TZNAME:IST",
     "END:STANDARD",
     "END:VTIMEZONE",
-    "BEGIN:VEVENT",
-    `UID:${event.id}@eventsync-india`,
-    `DTSTAMP:${toICSDateUTC(new Date().toISOString())}`,
-    `DTSTART;TZID=Asia/Kolkata:${toICSDateIST(event.startsAt)}`,
-    `DTEND;TZID=Asia/Kolkata:${toICSDateIST(event.endsAt)}`,
-    `SUMMARY:${escapeICS(event.title)}`,
-    `DESCRIPTION:${escapeICS(
-      `${event.description}\n\nRegistration: ${fee}${event.platform ? ` on ${event.platform}` : ""}\nFormat: ${event.mode}\nOrganizer: ${event.organizer}\nAll times in IST (UTC+05:30).`,
-    )}`,
-    `LOCATION:${escapeICS(`${event.location}, ${event.city}`)}`,
-    `CATEGORIES:${escapeICS(event.category)}`,
-    "STATUS:CONFIRMED",
-    "BEGIN:VALARM",
-    "TRIGGER:-PT30M",
-    "ACTION:DISPLAY",
-    `DESCRIPTION:${escapeICS(`${event.title} starts in 30 minutes`)}`,
-    "END:VALARM",
-    "END:VEVENT",
-    "END:VCALENDAR",
   ];
-  return `${lines.map(foldLine).join("\r\n")}\r\n`;
-}
 
-function downloadICS(event: EventItem): void {
-  const blob = new Blob([generateICS(event)], {
+  for (const ev of events) {
+    lines.push(...generateSingleVEvent(ev));
+  }
+
+  lines.push("END:VCALENDAR");
+
+  const blob = new Blob([lines.map(foldLine).join("\r\n") + "\r\n"], {
     type: "text/calendar;charset=utf-8",
   });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `${slugify(event.title)}.ics`;
+  link.download = filename;
   document.body.appendChild(link);
   link.click();
   link.remove();
@@ -257,52 +306,71 @@ function downloadICS(event: EventItem): void {
 
 function fireConfetti() {
   if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-  const colors = ["#34d399", "#4f46e5", "#fbbf24"];
-  confetti({ particleCount: 90, spread: 70, origin: { y: 0.65 }, colors });
-  setTimeout(
-    () =>
-      confetti({
-        particleCount: 40,
-        angle: 60,
-        spread: 55,
-        origin: { x: 0, y: 0.7 },
-        colors,
-      }),
-    180,
-  );
-  setTimeout(
-    () =>
-      confetti({
-        particleCount: 40,
-        angle: 120,
-        spread: 55,
-        origin: { x: 1, y: 0.7 },
-        colors,
-      }),
-    180,
-  );
+  const colors = ["#38bdf8", "#6366f1", "#10b981", "#f59e0b"];
+  confetti({ particleCount: 80, spread: 70, origin: { y: 0.65 }, colors });
 }
 
 /* -------------------------------------------------------------------------- */
-/*  Page                                                                      */
+/*  Main Component                                                            */
 /* -------------------------------------------------------------------------- */
 
 export default function Home() {
   const net = useNetworkSync();
   const { isOnline, version } = net;
 
-  const [tab, setTab] = useState<Tab>("discover");
+  // Student Authentication State (Persists offline via localStorage)
+  const [student, setStudent] = useState<StudentProfile | null>(null);
+  const [authInitialized, setAuthInitialized] = useState(false);
+
+  // Tab State: [1. Opportunity Aggregator], [2. My Applications & Tracker], [3. Venue Offline Check-In]
+  const [tab, setTab] = useState<Tab>("aggregator");
+
+  // Core Data
   const [events, setEvents] = useState<EventItem[]>([]);
   const [eventsSource, setEventsSource] = useState<EventsSource | null>(null);
+  const [applications, setApplications] = useState<StudentApplication[]>([]);
   const [wallet, setWallet] = useState<PendingCheckin[]>([]);
   const [preselectedEventId, setPreselectedEventId] = useState("");
 
+  // Load student session from offline storage on mount
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(STUDENT_SESSION_KEY);
+      if (stored) {
+        setStudent(JSON.parse(stored) as StudentProfile);
+      }
+    } catch {
+      // Best effort
+    }
+    setAuthInitialized(true);
+  }, []);
+
+  const handleLogin = (profile: StudentProfile) => {
+    setStudent(profile);
+    try {
+      localStorage.setItem(STUDENT_SESSION_KEY, JSON.stringify(profile));
+    } catch {
+      // Storage might be restricted
+    }
+    fireConfetti();
+  };
+
+  const handleLogout = () => {
+    setStudent(null);
+    try {
+      localStorage.removeItem(STUDENT_SESSION_KEY);
+    } catch {
+      // Best effort
+    }
+  };
+
+  // Maps events by ID
   const eventsById = useMemo(
     () => new Map(events.map((event) => [event.id, event])),
     [events],
   );
 
-  /* Event feed: IndexedDB first, refreshed from the network whenever we're connected. */
+  // Load events (IndexedDB first, fallback to network/bundled)
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -310,8 +378,9 @@ export default function Home() {
       try {
         cached = await getCachedEvents();
       } catch {
-        // IndexedDB unavailable: fall through to network or bundled data.
+        // IDB unavailable
       }
+
       if (!cancelled && cached.length > 0) {
         setEvents(cached);
         setEventsSource("cache");
@@ -319,22 +388,22 @@ export default function Home() {
 
       if (isOnline) {
         try {
-          const response = await fetch("/api/events", { cache: "no-store" });
-          if (!response.ok)
-            throw new Error(`Events request failed with ${response.status}`);
-          const data = (await response.json()) as { events: EventItem[] };
-          try {
-            await cacheEvents(data.events);
-          } catch {
-            // Caching is best effort.
+          const res = await fetch("/api/events", { cache: "no-store" });
+          if (res.ok) {
+            const data = (await res.json()) as { events: EventItem[] };
+            try {
+              await cacheEvents(data.events);
+            } catch {
+              // Best effort
+            }
+            if (!cancelled) {
+              setEvents(data.events);
+              setEventsSource("network");
+            }
+            return;
           }
-          if (!cancelled) {
-            setEvents(data.events);
-            setEventsSource("network");
-          }
-          return;
         } catch {
-          // Fall through to cache or bundled data.
+          // Network fall-through
         }
       }
 
@@ -343,7 +412,7 @@ export default function Home() {
         try {
           await cacheEvents(seed);
         } catch {
-          // Best effort.
+          // Best effort
         }
         setEvents(seed);
         setEventsSource("bundled");
@@ -354,7 +423,27 @@ export default function Home() {
     };
   }, [isOnline]);
 
-  /* Local check-ins (the attendee's wallet). Re-read whenever the queue changes. */
+  // Load student applications from IndexedDB
+  const refreshApplications = useCallback(async () => {
+    if (!student?.rollNoOrEmail) {
+      setApplications([]);
+      return;
+    }
+    try {
+      const list = await getStudentApplications(student.rollNoOrEmail);
+      // Sort newest first
+      list.sort((a, b) => b.appliedAt.localeCompare(a.appliedAt));
+      setApplications(list);
+    } catch {
+      setApplications([]);
+    }
+  }, [student?.rollNoOrEmail]);
+
+  useEffect(() => {
+    void refreshApplications();
+  }, [refreshApplications, version]);
+
+  // Local check-ins (Dexie IndexedDB wallet)
   useEffect(() => {
     let cancelled = false;
     db.pendingCheckins
@@ -370,25 +459,43 @@ export default function Home() {
     };
   }, [version]);
 
-  /* Service worker: app-shell caching and PWA installability (production builds only). */
+  // Register service worker for PWA capabilities
   useEffect(() => {
     if (process.env.NODE_ENV === "production" && "serviceWorker" in navigator) {
       navigator.serviceWorker.register("/sw.js").catch(() => undefined);
     }
   }, []);
 
-  /* Home-screen shortcuts open /?tab=checkin or /?tab=dashboard. */
+  // Handle URL tabs (?tab=aggregator | ?tab=tracker | ?tab=checkin)
   useEffect(() => {
     const requested = new URLSearchParams(window.location.search).get("tab");
-    if (
-      requested === "checkin" ||
-      requested === "dashboard" ||
-      requested === "discover"
-    )
-      setTab(requested);
+    if (requested === "aggregator" || requested === "tracker" || requested === "checkin") {
+      setTab(requested as Tab);
+    }
   }, []);
 
-  const goToCheckin = useCallback((eventId: string) => {
+  // Save / apply action
+  const handleSaveApplication = async (event: EventItem, initialStatus: ApplicationStatus = "Applied / Registered") => {
+    if (!student) {
+      alert("Please login with your Student Profile first to save applications!");
+      return;
+    }
+    try {
+      await saveStudentApplication({
+        eventId: event.id,
+        studentEmail: student.rollNoOrEmail,
+        status: initialStatus,
+        appliedAt: new Date().toISOString(),
+        teamName: `${student.fullName.split(" ")[0]}'s Squad`,
+      });
+      await refreshApplications();
+      fireConfetti();
+    } catch {
+      alert("Unable to save application locally. Please check storage permissions.");
+    }
+  };
+
+  const goToCheckinWithEvent = useCallback((eventId: string) => {
     setPreselectedEventId(eventId);
     setTab("checkin");
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -396,34 +503,58 @@ export default function Home() {
 
   const simulated = net.simulatedOffline;
 
+  // Render Student Portal Login Screen if not authenticated
+  if (authInitialized && !student) {
+    return (
+      <StudentAuthPortal
+        onLogin={handleLogin}
+        isOnline={isOnline}
+        simulated={simulated}
+        toggleSimulated={net.toggleSimulation}
+      />
+    );
+  }
+
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-200">
-      {/* ------------------------------ Top bar ------------------------------ */}
-      <header className="sticky top-0 z-30 border-b border-slate-800 bg-slate-950/90 backdrop-blur">
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-4 gap-y-3 px-4 py-3">
-          <div className="flex items-center gap-2.5">
-            <span className="grid h-9 w-9 place-items-center rounded-lg bg-indigo-600 text-white">
-              <Radio className="h-4 w-4" aria-hidden />
-            </span>
+    <div className="min-h-screen bg-slate-950 text-slate-100 selection:bg-indigo-500/30 selection:text-indigo-200">
+      {/* --------------------------- Top Header --------------------------- */}
+      <header className="sticky top-0 z-30 border-b border-slate-800/80 bg-slate-950/90 backdrop-blur-md">
+        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-x-4 gap-y-3 px-4 py-3 sm:px-6">
+          {/* Logo & Student Platform Tag */}
+          <div className="flex items-center gap-3">
+            <div className="relative flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 via-indigo-600 to-sky-600 shadow-lg shadow-indigo-500/20 ring-1 ring-white/20">
+              <GraduationCap className="h-5 w-5 text-white" aria-hidden />
+              <span className="absolute -bottom-1 -right-1 flex h-3 w-3">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+                <span className="relative inline-flex h-3 w-3 rounded-full bg-emerald-500" />
+              </span>
+            </div>
             <div>
-              <p className="text-sm font-semibold leading-none text-slate-100">
-                EventSync India
-              </p>
-              <p className="mt-1 text-xs text-slate-400">
-                Tech and campus events, even offline
+              <div className="flex items-center gap-2">
+                <h1 className="text-base font-bold tracking-tight text-white sm:text-lg">
+                  EventSync <span className="text-indigo-400">Pro</span>
+                </h1>
+                <span className="rounded-md border border-indigo-500/30 bg-indigo-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-indigo-300">
+                  Student Edition
+                </span>
+              </div>
+              <p className="text-xs text-slate-400">
+                Aggregator & Tracker · Unstop · Devfolio · SIH · HackerEarth
               </p>
             </div>
           </div>
 
-          <div className="ml-auto flex flex-wrap items-center gap-2">
+          {/* Right Controls: Student Profile, Network Toggle, Sync, PWA Install */}
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+            {/* Network Status Badge */}
             <span
               role="status"
               aria-live="polite"
               className={clsx(
-                "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium",
+                "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium shadow-sm transition",
                 isOnline
-                  ? "border-emerald-400/40 bg-emerald-400/10 text-emerald-400"
-                  : "border-amber-400/40 bg-amber-400/10 text-amber-400",
+                  ? "border-emerald-500/40 bg-emerald-950/40 text-emerald-400 shadow-emerald-950/50"
+                  : "border-amber-500/40 bg-amber-950/40 text-amber-400 shadow-amber-950/50",
               )}
             >
               {isOnline ? (
@@ -431,19 +562,17 @@ export default function Home() {
               ) : (
                 <WifiOff className="h-3.5 w-3.5" aria-hidden />
               )}
-              {isOnline
-                ? "Online"
-                : simulated
-                  ? "Offline (simulated)"
-                  : "Offline"}
+              <span>{isOnline ? "Online" : simulated ? "Offline (Simulated)" : "Offline (Local Engine)"}</span>
             </span>
 
+            {/* Network Status Simulator Toggle */}
             <button
               type="button"
               role="switch"
               aria-checked={simulated}
               onClick={net.toggleSimulation}
-              className="inline-flex items-center gap-2 rounded-full border border-slate-800 bg-slate-900 px-3 py-1.5 text-xs font-medium text-slate-300 transition hover:border-slate-700"
+              title="Toggle network simulation outage to test offline Dexie syncing"
+              className="inline-flex items-center gap-2 rounded-full border border-slate-800 bg-slate-900/90 px-3 py-1 text-xs font-medium text-slate-300 shadow-sm transition hover:border-slate-700 hover:text-white"
             >
               <span
                 className={clsx(
@@ -454,561 +583,1017 @@ export default function Home() {
               >
                 <span
                   className={clsx(
-                    "absolute top-0.5 h-3 w-3 rounded-full bg-slate-950 transition-all",
+                    "absolute top-0.5 h-3 w-3 rounded-full bg-slate-950 shadow transition-all",
                     simulated ? "left-3.5" : "left-0.5",
                   )}
                 />
               </span>
-              Simulate outage
+              <span className="hidden sm:inline">Simulate Outage</span>
             </button>
 
+            {/* Sync Status Indicator / Queue */}
             <span
               className={clsx(
-                "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium",
+                "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium",
                 net.pendingCount > 0
-                  ? "border-amber-400/40 bg-amber-400/10 text-amber-400"
-                  : "border-slate-800 bg-slate-900 text-emerald-400",
+                  ? "border-amber-500/40 bg-amber-500/10 text-amber-400 animate-pulse"
+                  : "border-slate-800 bg-slate-900 text-slate-300",
               )}
             >
               {net.isSyncing ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-indigo-400" aria-hidden />
               ) : net.pendingCount > 0 ? (
-                <Clock className="h-3.5 w-3.5" aria-hidden />
+                <Clock className="h-3.5 w-3.5 text-amber-400" aria-hidden />
               ) : (
-                <CheckCircle2 className="h-3.5 w-3.5" aria-hidden />
+                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" aria-hidden />
               )}
-              {net.isSyncing
-                ? "Syncing..."
-                : net.pendingCount > 0
-                  ? `${net.pendingCount} waiting to sync`
-                  : "All check-ins synced"}
+              <span>
+                {net.isSyncing
+                  ? "Syncing Dexie..."
+                  : net.pendingCount > 0
+                    ? `${net.pendingCount} Offline Sync Pending`
+                    : "IndexedDB Synced"}
+              </span>
             </span>
 
+            {/* Force Sync Button */}
             <button
               type="button"
               onClick={() => void net.syncNow({ force: true })}
               disabled={!isOnline || net.isSyncing}
-              title={
-                isOnline ? "Send queued check-ins now" : "Reconnect to sync"
-              }
-              className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-500"
+              title={isOnline ? "Force Sync offline passes to server" : "Connect to network to sync"}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-500/30 bg-indigo-600/90 px-2.5 py-1 text-xs font-semibold text-white shadow-sm transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:border-slate-800 disabled:bg-slate-800/60 disabled:text-slate-500"
             >
-              <RefreshCw
-                className={clsx("h-3.5 w-3.5", net.isSyncing && "animate-spin")}
-                aria-hidden
-              />
-              Force Sync
+              <RefreshCw className={clsx("h-3.5 w-3.5", net.isSyncing && "animate-spin")} aria-hidden />
+              <span className="hidden sm:inline">Sync Now</span>
             </button>
 
+            {/* Install App / APK PWA Button */}
             {net.canInstall && (
               <button
                 type="button"
                 onClick={() => void net.promptInstall()}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-400/40 bg-emerald-400/10 px-3 py-1.5 text-xs font-semibold text-emerald-400 transition hover:bg-emerald-400/20"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-400/40 bg-emerald-500/20 px-2.5 py-1 text-xs font-semibold text-emerald-400 shadow transition hover:bg-emerald-500/30"
               >
                 <Download className="h-3.5 w-3.5" aria-hidden />
-                Install App (APK)
+                <span>Install APK / PWA</span>
               </button>
             )}
-            {net.isInstalled && (
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-800 bg-slate-900 px-3 py-1.5 text-xs font-medium text-slate-400">
-                <CheckCircle2
-                  className="h-3.5 w-3.5 text-emerald-400"
-                  aria-hidden
-                />
-                Installed
-              </span>
+
+            {/* Student Profile Pill */}
+            {student && (
+              <div className="flex items-center gap-2 rounded-full border border-indigo-500/30 bg-slate-900/90 py-0.5 pl-2.5 pr-1 text-xs">
+                <span className="font-semibold text-indigo-300">{student.fullName}</span>
+                <span className="hidden text-slate-400 md:inline">({student.collegeName})</span>
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  title="Sign out of student portal"
+                  className="rounded-full p-1 text-slate-400 transition hover:bg-slate-800 hover:text-rose-400"
+                >
+                  <LogOut className="h-3.5 w-3.5" />
+                  <span className="sr-only">Sign out</span>
+                </button>
+              </div>
             )}
           </div>
         </div>
 
+        {/* Offline Banner Notification */}
         {!isOnline && (
-          <div className="border-t border-amber-400/30 bg-amber-400/10">
-            <p className="mx-auto max-w-6xl px-4 py-2 text-xs text-amber-400">
-              {simulated
-                ? "Simulated outage is on. Browse events, search, export calendars and check in. Everything is saved on this device and syncs when you switch it off."
-                : "No connection. Browse events, search, export calendars and check in. Everything is saved on this device and syncs automatically when you're back online."}
-            </p>
-          </div>
-        )}
-        {isOnline && net.lastError && (
-          <div className="border-t border-amber-400/30 bg-amber-400/10">
-            <p className="mx-auto max-w-6xl px-4 py-2 text-xs text-amber-400">
-              Sync paused: {net.lastError} Your check-ins are safe on this
-              device. Retrying automatically.
-            </p>
-          </div>
-        )}
-        {isOnline &&
-          !net.lastError &&
-          net.lastSync &&
-          net.pendingCount === 0 && (
-            <div className="border-t border-emerald-400/20 bg-emerald-400/5">
-              <p className="mx-auto max-w-6xl px-4 py-2 text-xs text-emerald-400">
-                Synced {net.lastSync.accepted} new check-in
-                {net.lastSync.accepted === 1 ? "" : "s"}
-                {net.lastSync.duplicates > 0
-                  ? `, ${net.lastSync.duplicates} already on record`
-                  : ""}
-                {net.lastSync.rejected > 0
-                  ? `, ${net.lastSync.rejected} rejected`
-                  : ""}
-                .
-              </p>
+          <div className="border-t border-amber-500/30 bg-amber-500/10 px-4 py-1.5 text-xs text-amber-300">
+            <div className="mx-auto flex max-w-7xl items-center justify-between gap-2">
+              <span className="flex items-center gap-1.5">
+                <Zap className="h-3.5 w-3.5 shrink-0 text-amber-400" />
+                <span>
+                  <strong>Offline Mode Active:</strong> You can explore events, generate passes, and record attendance locally. Everything saves to Dexie IndexedDB and syncs automatically when network resumes.
+                </span>
+              </span>
             </div>
-          )}
+          </div>
+        )}
       </header>
 
-      {/* ------------------------------- Tabs ------------------------------- */}
-      <main className="mx-auto max-w-6xl px-4 pb-16 pt-6">
+      {/* ------------------------- Main Navigation Tabs ------------------------- */}
+      <main className="mx-auto max-w-7xl px-4 pb-20 pt-6 sm:px-6">
         <div
           role="tablist"
-          aria-label="Sections"
-          className="flex flex-wrap gap-1 rounded-xl border border-slate-800 bg-slate-900 p-1"
+          aria-label="Student Navigation Tabs"
+          className="grid grid-cols-1 gap-2 rounded-2xl border border-slate-800/80 bg-slate-900/80 p-1.5 sm:grid-cols-3"
         >
-          {TABS.map(({ id, label, icon: Icon }) => (
-            <button
-              key={id}
-              role="tab"
-              id={`tab-${id}`}
-              aria-selected={tab === id}
-              aria-controls={`panel-${id}`}
-              type="button"
-              onClick={() => setTab(id)}
-              className={clsx(
-                "inline-flex flex-1 items-center justify-center gap-2 whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium transition",
-                tab === id
-                  ? "bg-indigo-600 text-white"
-                  : "text-slate-400 hover:bg-slate-800 hover:text-slate-200",
-              )}
-            >
-              <Icon className="h-4 w-4" aria-hidden />
-              {label}
-              {id === "checkin" && net.pendingCount > 0 && (
-                <span className="rounded-full bg-amber-400 px-1.5 text-xs font-semibold text-slate-950">
-                  {net.pendingCount}
-                </span>
-              )}
-            </button>
-          ))}
+          {TABS.map(({ id, label, icon: Icon }) => {
+            const isActive = tab === id;
+            return (
+              <button
+                key={id}
+                role="tab"
+                id={`tab-${id}`}
+                aria-selected={isActive}
+                aria-controls={`panel-${id}`}
+                type="button"
+                onClick={() => setTab(id)}
+                className={clsx(
+                  "relative inline-flex items-center justify-center gap-2.5 rounded-xl px-4 py-3 text-sm font-semibold transition-all duration-150",
+                  isActive
+                    ? "bg-gradient-to-r from-indigo-600 to-indigo-500 text-white shadow-md shadow-indigo-600/30"
+                    : "text-slate-400 hover:bg-slate-800/60 hover:text-slate-200",
+                )}
+              >
+                <Icon className={clsx("h-4 w-4", isActive ? "text-white" : "text-slate-400")} aria-hidden />
+                <span>{label}</span>
+                {id === "tracker" && applications.length > 0 && (
+                  <span className="rounded-full bg-indigo-950/80 px-2 py-0.5 text-xs font-bold text-indigo-300 ring-1 ring-indigo-500/40">
+                    {applications.length}
+                  </span>
+                )}
+                {id === "checkin" && net.pendingCount > 0 && (
+                  <span className="rounded-full bg-amber-400 px-2 py-0.5 text-xs font-bold text-slate-950">
+                    {net.pendingCount} queued
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
 
-        <div className="mt-6">
-          {tab === "discover" && (
-            <section
-              role="tabpanel"
-              id="panel-discover"
-              aria-labelledby="tab-discover"
-            >
-              <DiscoverTab
-                events={events}
-                source={eventsSource}
-                isOnline={isOnline}
-                onCheckin={goToCheckin}
-              />
-            </section>
-          )}
-          {tab === "checkin" && (
-            <section
-              role="tabpanel"
-              id="panel-checkin"
-              aria-labelledby="tab-checkin"
-            >
-              <CheckinTab
-                events={events}
-                eventsById={eventsById}
-                wallet={wallet}
-                isOnline={isOnline}
-                preselectedEventId={preselectedEventId}
-                enqueueCheckin={net.enqueueCheckin}
-              />
-            </section>
-          )}
-          {tab === "dashboard" && (
-            <section
-              role="tabpanel"
-              id="panel-dashboard"
-              aria-labelledby="tab-dashboard"
-            >
-              <DashboardTab
-                events={events}
-                eventsById={eventsById}
-                wallet={wallet}
-                isOnline={isOnline}
-                syncStamp={net.lastSync?.at ?? ""}
-              />
-            </section>
-          )}
-        </div>
+        {/* ------------------------- Tab 1: Opportunity Aggregator ------------------------- */}
+        {tab === "aggregator" && (
+          <div className="mt-8">
+            <AggregatorTab
+              events={events}
+              source={eventsSource}
+              isOnline={isOnline}
+              student={student}
+              appliedEventIds={new Set(applications.map((a) => a.eventId))}
+              onSaveApplication={handleSaveApplication}
+              onCheckin={goToCheckinWithEvent}
+            />
+          </div>
+        )}
+
+        {/* ------------------------- Tab 2: My Applications & Tracker ------------------------- */}
+        {tab === "tracker" && (
+          <div className="mt-8">
+            <TrackerTab
+              eventsById={eventsById}
+              applications={applications}
+              student={student}
+              onUpdateStatus={async (id, status) => {
+                await updateApplicationStatus(id, status);
+                await refreshApplications();
+              }}
+              onRemoveApplication={async (id) => {
+                if (confirm("Remove this application from your tracker?")) {
+                  await removeStudentApplication(id);
+                  await refreshApplications();
+                }
+              }}
+              onGoToCheckin={(eventId) => goToCheckinWithEvent(eventId)}
+            />
+          </div>
+        )}
+
+        {/* ------------------------- Tab 3: Venue Offline Check-In ------------------------- */}
+        {tab === "checkin" && (
+          <div className="mt-8">
+            <VenueCheckinTab
+              events={events}
+              eventsById={eventsById}
+              wallet={wallet}
+              student={student}
+              isOnline={isOnline}
+              preselectedEventId={preselectedEventId}
+              enqueueCheckin={net.enqueueCheckin}
+            />
+          </div>
+        )}
       </main>
     </div>
   );
 }
 
 /* -------------------------------------------------------------------------- */
-/*  Discover                                                                  */
+/*  Student Auth Portal Component                                             */
 /* -------------------------------------------------------------------------- */
 
-function DiscoverTab({
+function StudentAuthPortal({
+  onLogin,
+  isOnline,
+  simulated,
+  toggleSimulated,
+}: {
+  onLogin: (profile: StudentProfile) => void;
+  isOnline: boolean;
+  simulated: boolean;
+  toggleSimulated: () => void;
+}) {
+  const [fullName, setFullName] = useState("Aarav Sharma");
+  const [collegeName, setCollegeName] = useState("Veermata Jijabai Technological Institute (VJTI)");
+  const [rollNoOrEmail, setRollNoOrEmail] = useState("aarav.sharma@vjti.ac.in");
+  const [password, setPassword] = useState("student@2026");
+  const [degreeBranch, setDegreeBranch] = useState("B.Tech Computer Engineering");
+  const [yearOfStudy, setYearOfStudy] = useState("3rd Year");
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    if (!fullName.trim() || fullName.trim().length < 2) {
+      return setError("Please enter your full name.");
+    }
+    if (!collegeName.trim() || collegeName.trim().length < 3) {
+      return setError("Please enter your college or university name.");
+    }
+    if (!rollNoOrEmail.trim() || rollNoOrEmail.trim().length < 3) {
+      return setError("Please enter a valid student roll number or institutional email.");
+    }
+    if (!password.trim() || password.length < 4) {
+      return setError("Password must be at least 4 characters.");
+    }
+
+    onLogin({
+      fullName: fullName.trim(),
+      collegeName: collegeName.trim(),
+      rollNoOrEmail: rollNoOrEmail.trim().toLowerCase(),
+      degreeBranch,
+      yearOfStudy,
+    });
+  };
+
+  const fillQuickDemo = (profileName: "VJTI" | "COEP" | "IITB") => {
+    if (profileName === "VJTI") {
+      setFullName("Aarav Sharma");
+      setCollegeName("VJTI Mumbai");
+      setRollNoOrEmail("aarav.sharma@vjti.ac.in");
+      setDegreeBranch("B.Tech Computer Science");
+      setYearOfStudy("3rd Year");
+    } else if (profileName === "COEP") {
+      setFullName("Pooja Kulkarni");
+      setCollegeName("COEP Technological University, Pune");
+      setRollNoOrEmail("pooja.k@coep.ac.in");
+      setDegreeBranch("B.Tech Artificial Intelligence");
+      setYearOfStudy("4th Year");
+    } else {
+      setFullName("Rohan Deshmukh");
+      setCollegeName("IIT Bombay");
+      setRollNoOrEmail("rohan.d@iitb.ac.in");
+      setDegreeBranch("B.Tech Electrical Engineering");
+      setYearOfStudy("2nd Year");
+    }
+    setError(null);
+  };
+
+  return (
+    <div className="flex min-h-screen flex-col items-center justify-center bg-slate-950 px-4 py-12 text-slate-100">
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_var(--tw-gradient-stops))] from-indigo-900/20 via-slate-950/80 to-slate-950 -z-10" />
+
+      {/* Network Simulator toggle in login screen */}
+      <div className="mb-6 flex items-center gap-3 rounded-full border border-slate-800 bg-slate-900/90 px-4 py-1.5 text-xs text-slate-300">
+        <span className={clsx("h-2 w-2 rounded-full", isOnline ? "bg-emerald-400" : "bg-amber-400")} />
+        <span>{isOnline ? "Network Online" : simulated ? "Offline (Simulated Outage)" : "Offline"}</span>
+        <button
+          type="button"
+          onClick={toggleSimulated}
+          className="ml-2 rounded-md bg-slate-800 px-2 py-0.5 text-[11px] font-semibold text-slate-200 hover:bg-slate-700"
+        >
+          {simulated ? "Turn Online" : "Simulate Offline"}
+        </button>
+      </div>
+
+      <div className="w-full max-w-md rounded-2xl border border-slate-800 bg-slate-900/90 p-8 shadow-2xl backdrop-blur-xl">
+        <div className="flex flex-col items-center text-center">
+          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-tr from-indigo-600 to-sky-500 shadow-xl shadow-indigo-500/20">
+            <GraduationCap className="h-8 w-8 text-white" />
+          </div>
+          <h1 className="mt-4 text-2xl font-bold tracking-tight text-white">
+            Student Opportunity Portal
+          </h1>
+          <p className="mt-1 text-sm text-slate-400">
+            Sign in to track Unstop, Devfolio & SIH applications with offline Dexie sync.
+          </p>
+        </div>
+
+        {/* Demo Fast Fill Buttons */}
+        <div className="mt-6">
+          <p className="text-center text-xs font-medium text-slate-500 uppercase tracking-wider">
+            Quick Fill Demo Profiles:
+          </p>
+          <div className="mt-2 flex justify-center gap-2">
+            <button
+              type="button"
+              onClick={() => fillQuickDemo("VJTI")}
+              className="rounded-lg border border-slate-800 bg-slate-950 px-2.5 py-1 text-xs text-slate-300 hover:border-indigo-500 hover:text-white"
+            >
+              VJTI (Aarav)
+            </button>
+            <button
+              type="button"
+              onClick={() => fillQuickDemo("COEP")}
+              className="rounded-lg border border-slate-800 bg-slate-950 px-2.5 py-1 text-xs text-slate-300 hover:border-indigo-500 hover:text-white"
+            >
+              COEP (Pooja)
+            </button>
+            <button
+              type="button"
+              onClick={() => fillQuickDemo("IITB")}
+              className="rounded-lg border border-slate-800 bg-slate-950 px-2.5 py-1 text-xs text-slate-300 hover:border-indigo-500 hover:text-white"
+            >
+              IIT Bombay (Rohan)
+            </button>
+          </div>
+        </div>
+
+        <form onSubmit={handleSubmit} className="mt-6 space-y-4">
+          <div>
+            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
+              Full Name
+            </label>
+            <input
+              type="text"
+              value={fullName}
+              onChange={(e) => setFullName(e.target.value)}
+              placeholder="e.g. Aarav Sharma"
+              className="mt-1.5 w-full rounded-xl border border-slate-800 bg-slate-950 px-3.5 py-2.5 text-sm text-slate-100 placeholder:text-slate-600 focus:border-indigo-500 focus:outline-none"
+              required
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
+              College / University Name
+            </label>
+            <input
+              type="text"
+              value={collegeName}
+              onChange={(e) => setCollegeName(e.target.value)}
+              placeholder="e.g. Ruia College, Mumbai"
+              className="mt-1.5 w-full rounded-xl border border-slate-800 bg-slate-950 px-3.5 py-2.5 text-sm text-slate-100 placeholder:text-slate-600 focus:border-indigo-500 focus:outline-none"
+              required
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
+              Student Email or Roll Number
+            </label>
+            <input
+              type="text"
+              value={rollNoOrEmail}
+              onChange={(e) => setRollNoOrEmail(e.target.value)}
+              placeholder="e.g. student@college.edu or 22BCS104"
+              className="mt-1.5 w-full rounded-xl border border-slate-800 bg-slate-950 px-3.5 py-2.5 text-sm text-slate-100 placeholder:text-slate-600 focus:border-indigo-500 focus:outline-none"
+              required
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
+                Degree / Branch
+              </label>
+              <input
+                type="text"
+                value={degreeBranch}
+                onChange={(e) => setDegreeBranch(e.target.value)}
+                placeholder="Computer Engg"
+                className="mt-1.5 w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2.5 text-sm text-slate-100 placeholder:text-slate-600 focus:border-indigo-500 focus:outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
+                Year of Study
+              </label>
+              <input
+                type="text"
+                value={yearOfStudy}
+                onChange={(e) => setYearOfStudy(e.target.value)}
+                placeholder="3rd Year"
+                className="mt-1.5 w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2.5 text-sm text-slate-100 placeholder:text-slate-600 focus:border-indigo-500 focus:outline-none"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
+              Password
+            </label>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="••••••••"
+              className="mt-1.5 w-full rounded-xl border border-slate-800 bg-slate-950 px-3.5 py-2.5 text-sm text-slate-100 placeholder:text-slate-600 focus:border-indigo-500 focus:outline-none"
+              required
+            />
+          </div>
+
+          {error && (
+            <p className="rounded-lg border border-rose-500/40 bg-rose-500/10 p-2.5 text-xs text-rose-300">
+              {error}
+            </p>
+          )}
+
+          <button
+            type="submit"
+            className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-indigo-600 to-indigo-500 py-3 text-sm font-semibold text-white shadow-lg shadow-indigo-600/30 transition hover:from-indigo-500 hover:to-indigo-400"
+          >
+            <span>Enter Student Workspace</span>
+            <ArrowRight className="h-4 w-4" />
+          </button>
+        </form>
+
+        <p className="mt-5 text-center text-xs text-slate-500">
+          Persistent offline authentication via IndexedDB & LocalStorage. Stays signed in across offline restarts.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Aggregator Tab (Unstop, Devfolio, HackerEarth, SIH, Campus)               */
+/* -------------------------------------------------------------------------- */
+
+function AggregatorTab({
   events,
   source,
   isOnline,
+  student,
+  appliedEventIds,
+  onSaveApplication,
   onCheckin,
 }: {
   events: EventItem[];
   source: EventsSource | null;
   isOnline: boolean;
+  student: StudentProfile | null;
+  appliedEventIds: Set<string>;
+  onSaveApplication: (event: EventItem) => void;
   onCheckin: (eventId: string) => void;
 }) {
   const [query, setQuery] = useState("");
+  const [selectedSource, setSelectedSource] = useState<"All" | OpportunitySource>("All");
   const [category, setCategory] = useState<"All" | EventCategory>("All");
-  const [mode, setMode] = useState<"All" | EventMode>("All");
   const [region, setRegion] = useState<RegionFilter>("All India");
 
   const filtered = useMemo(() => {
     const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
     return events
-      .filter((event) =>
-        category === "All" ? true : event.category === category,
-      )
-      .filter((event) => (mode === "All" ? true : event.mode === mode))
-      .filter((event) =>
-        region === "All India" ? true : event.regionGroup === region,
-      )
+      .filter((event) => (selectedSource === "All" ? true : event.sourceBadge === selectedSource))
+      .filter((event) => (category === "All" ? true : event.category === category))
+      .filter((event) => (region === "All India" ? true : event.regionGroup === region))
       .filter((event) => {
         if (terms.length === 0) return true;
         const haystack =
-          `${event.title} ${event.tags.join(" ")} ${event.description} ${event.city} ${event.stateRegion} ${event.platform ?? ""}`.toLowerCase();
+          `${event.title} ${event.tags.join(" ")} ${event.description} ${event.city} ${event.sourceBadge} ${event.organizer}`.toLowerCase();
         return terms.every((term) => haystack.includes(term));
       })
       .sort((a, b) => a.startsAt.localeCompare(b.startsAt));
-  }, [events, query, category, mode, region]);
-
-  const sourceLabel = !isOnline
-    ? "Showing events saved on this device"
-    : source === "network"
-      ? "Live from the server, saved for offline use"
-      : source === "bundled"
-        ? "Showing built-in sample events"
-        : "Showing events saved on this device";
+  }, [events, query, selectedSource, category, region]);
 
   return (
-    <div className="space-y-5">
-      <div className="space-y-4 rounded-xl border border-slate-800 bg-slate-900 p-4">
+    <div className="space-y-6">
+      {/* Top Welcome / Hero Banner for Students */}
+      <div className="relative overflow-hidden rounded-2xl border border-slate-800/80 bg-gradient-to-r from-slate-900 via-indigo-950/40 to-slate-900 p-6">
+        <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+          <div>
+            <div className="inline-flex items-center gap-2 rounded-full border border-indigo-500/30 bg-indigo-500/10 px-3 py-1 text-xs font-semibold text-indigo-300">
+              <Sparkles className="h-3.5 w-3.5" />
+              <span>Real-Time Student Hackathon & Opportunity Aggregator</span>
+            </div>
+            <h2 className="mt-2 text-xl font-bold text-white sm:text-2xl">
+              Discover & Track Hackathons across India & Global
+            </h2>
+            <p className="mt-1 text-sm text-slate-400">
+              Aggregated directly from Unstop, Devfolio, HackerEarth, SIH Portal & top university fests. Saved offline for instant verification.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => exportBatchICS(events, "All_Aggregated_Student_Hackathons.ics")}
+              className="inline-flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-800/80 px-4 py-2.5 text-xs font-semibold text-slate-200 transition hover:bg-slate-700"
+            >
+              <CalendarPlus className="h-4 w-4 text-indigo-400" />
+              <span>Export All to Calendar (.ics)</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Search & Filter Controls */}
+      <div className="space-y-4 rounded-2xl border border-slate-800/80 bg-slate-900/90 p-5 shadow-sm">
         <div className="relative">
-          <label htmlFor="event-search" className="sr-only">
-            Search events by title, tag, city or platform
-          </label>
-          <Search
-            className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500"
-            aria-hidden
-          />
+          <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
           <input
-            id="event-search"
             type="search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder='Search by title, tag, city or platform, e.g. "unstop", "pune" or "web3"'
-            className="w-full rounded-lg border border-slate-800 bg-slate-950 py-2.5 pl-10 pr-3 text-sm text-slate-100 placeholder:text-slate-500 focus:border-indigo-500"
+            placeholder='Search opportunities (e.g. "Unstop", "SIH", "Devfolio", "Ruia", "Gemini", "AI")...'
+            className="w-full rounded-xl border border-slate-800 bg-slate-950 py-3 pl-11 pr-4 text-sm text-slate-100 placeholder:text-slate-500 focus:border-indigo-500 focus:outline-none"
           />
         </div>
 
-        <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
-          <FilterGroup
-            label="Region"
-            options={REGIONS}
-            value={region}
-            onChange={setRegion}
-          />
-          <FilterGroup
-            label="Category"
-            options={CATEGORIES}
-            value={category}
-            onChange={setCategory}
-          />
-          <FilterGroup
-            label="Mode"
-            options={MODES}
-            value={mode}
-            onChange={setMode}
-          />
+        {/* Source Badges Filter Row */}
+        <div className="flex flex-wrap items-center gap-2 pt-1">
+          <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+            Source Platform:
+          </span>
+          {SOURCES.map((src) => {
+            const isSelected = selectedSource === src;
+            return (
+              <button
+                key={src}
+                type="button"
+                onClick={() => setSelectedSource(src)}
+                className={clsx(
+                  "rounded-full border px-3 py-1 text-xs font-medium transition",
+                  isSelected
+                    ? "border-indigo-500 bg-indigo-600 text-white shadow-sm"
+                    : "border-slate-800 bg-slate-950 text-slate-400 hover:border-slate-700 hover:text-slate-200",
+                )}
+              >
+                {src}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Secondary Category & Region Filters */}
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-3 border-t border-slate-800/60 pt-3 text-xs">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-slate-500">Category:</span>
+            {CATEGORIES.map((cat) => (
+              <button
+                key={cat}
+                type="button"
+                onClick={() => setCategory(cat)}
+                className={clsx(
+                  "rounded-lg px-2.5 py-1 transition",
+                  category === cat
+                    ? "bg-slate-800 text-white font-medium"
+                    : "text-slate-400 hover:text-slate-200",
+                )}
+              >
+                {cat}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-slate-500">Region:</span>
+            {REGIONS.map((reg) => (
+              <button
+                key={reg}
+                type="button"
+                onClick={() => setRegion(reg)}
+                className={clsx(
+                  "rounded-lg px-2.5 py-1 transition",
+                  region === reg
+                    ? "bg-slate-800 text-white font-medium"
+                    : "text-slate-400 hover:text-slate-200",
+                )}
+              >
+                {reg}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400">
-        <span aria-live="polite">
-          {filtered.length} event{filtered.length === 1 ? "" : "s"}
+      {/* Results Header */}
+      <div className="flex items-center justify-between text-xs text-slate-400">
+        <span>
+          Showing <strong>{filtered.length}</strong> opportunities
         </span>
-        <span
-          className={clsx(
-            "inline-flex items-center gap-1.5",
-            isOnline ? "text-emerald-400" : "text-amber-400",
-          )}
-        >
-          <span
-            className={clsx(
-              "h-1.5 w-1.5 rounded-full",
-              isOnline ? "bg-emerald-400" : "bg-amber-400",
-            )}
-            aria-hidden
-          />
-          {sourceLabel}
+        <span className="inline-flex items-center gap-1.5">
+          <span className={clsx("h-2 w-2 rounded-full", isOnline ? "bg-emerald-400" : "bg-amber-400")} />
+          <span>
+            {isOnline
+              ? "Live feed aggregated from verified portals"
+              : "Browsing offline cached catalogue (Dexie IndexedDB)"}
+          </span>
         </span>
       </div>
 
-      {events.length === 0 ? (
-        <p className="rounded-xl border border-slate-800 bg-slate-900 p-8 text-center text-sm text-slate-400">
-          Loading events...
-        </p>
-      ) : filtered.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-slate-800 bg-slate-900 p-8 text-center">
-          <p className="text-sm font-medium text-slate-200">
-            No events match your search
-          </p>
+      {/* Opportunity Grid */}
+      {filtered.length === 0 ? (
+        <div className="rounded-2xl border border-dashed border-slate-800 bg-slate-900/50 p-12 text-center">
+          <Trophy className="mx-auto h-10 w-10 text-slate-600" />
+          <h3 className="mt-3 text-base font-semibold text-slate-200">No opportunities match your filter</h3>
           <p className="mt-1 text-sm text-slate-400">
-            Clear the search box or switch the category and mode filters back to
-            All.
+            Try resetting your search query or switching source badges back to "All".
           </p>
           <button
             type="button"
             onClick={() => {
               setQuery("");
+              setSelectedSource("All");
               setCategory("All");
-              setMode("All");
               setRegion("All India");
             }}
-            className="mt-4 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-500"
+            className="mt-4 rounded-xl bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-500"
           >
-            Reset filters
+            Reset Filters
           </button>
         </div>
       ) : (
-        <ul className="grid gap-4 md:grid-cols-2">
-          {filtered.map((event) => (
-            <li key={event.id}>
-              <EventCard event={event} onCheckin={onCheckin} />
-            </li>
-          ))}
-        </ul>
+        <div className="grid gap-5 md:grid-cols-2">
+          {filtered.map((event) => {
+            const isSaved = appliedEventIds.has(event.id);
+            const badgeStyle = SOURCE_BADGES[event.sourceBadge] || SOURCE_BADGES.Campus;
+
+            return (
+              <article
+                key={event.id}
+                className="group flex flex-col justify-between rounded-2xl border border-slate-800/80 bg-slate-900/90 p-5 shadow-sm transition hover:border-slate-700 hover:shadow-lg hover:shadow-indigo-950/20"
+              >
+                <div>
+                  {/* Badges Bar */}
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      {/* Host Source Badge */}
+                      <span
+                        className={clsx(
+                          "inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-bold",
+                          badgeStyle.bg,
+                          badgeStyle.text,
+                          badgeStyle.border,
+                        )}
+                      >
+                        <Tag className="h-3 w-3" />
+                        {event.sourceBadge}
+                      </span>
+
+                      {/* Mode Badge */}
+                      <span className="inline-flex items-center gap-1 rounded-full border border-slate-800 bg-slate-950 px-2.5 py-0.5 text-xs text-slate-300">
+                        {event.mode}
+                      </span>
+
+                      {/* Fee Badge */}
+                      <span
+                        className={clsx(
+                          "rounded-full border px-2.5 py-0.5 text-xs font-medium",
+                          event.feeInINR === 0
+                            ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
+                            : "border-slate-700 bg-slate-950 text-slate-300",
+                        )}
+                      >
+                        {formatFee(event.feeInINR)}
+                      </span>
+                    </div>
+
+                    {event.prizePool && (
+                      <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-0.5 text-xs font-semibold text-amber-300">
+                        <Trophy className="h-3 w-3" />
+                        {event.prizePool}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Title & Description */}
+                  <h3 className="mt-3.5 text-lg font-bold text-white group-hover:text-indigo-300 transition-colors">
+                    {event.title}
+                  </h3>
+                  <p className="mt-1.5 line-clamp-3 text-sm leading-relaxed text-slate-400">
+                    {event.description}
+                  </p>
+
+                  {/* Details Metadata */}
+                  <div className="mt-4 space-y-1.5 text-xs text-slate-300">
+                    <div className="flex items-center gap-2">
+                      <Clock className="h-3.5 w-3.5 text-slate-500 shrink-0" />
+                      <span>{formatWhen(event.startsAt, event.endsAt)}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <MapPin className="h-3.5 w-3.5 text-slate-500 shrink-0" />
+                      <span>
+                        {event.location} · {event.city} ({event.stateRegion})
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Tags */}
+                  <div className="mt-3.5 flex flex-wrap gap-1.5">
+                    {event.tags.map((t) => (
+                      <span
+                        key={t}
+                        className="rounded-md border border-slate-800/80 bg-slate-950 px-2 py-0.5 text-[11px] text-slate-400"
+                      >
+                        #{t}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Card Action Buttons */}
+                <div className="mt-6 flex flex-wrap items-center justify-between gap-2 border-t border-slate-800/60 pt-4">
+                  {/* Left: Apply Link */}
+                  <a
+                    href={event.applyUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-indigo-600 to-indigo-500 px-3.5 py-2 text-xs font-semibold text-white shadow-sm transition hover:from-indigo-500 hover:to-indigo-400"
+                  >
+                    <span>Apply on {event.sourceBadge}</span>
+                    <ExternalLink className="h-3.5 w-3.5" />
+                  </a>
+
+                  {/* Right: Save to Tracker & Offline Pass button */}
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => onSaveApplication(event)}
+                      className={clsx(
+                        "inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-semibold transition",
+                        isSaved
+                          ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-400"
+                          : "border-slate-800 bg-slate-950 text-slate-300 hover:border-slate-700 hover:text-white",
+                      )}
+                    >
+                      <BookmarkCheck className="h-3.5 w-3.5" />
+                      <span>{isSaved ? "Saved in Tracker" : "Save to Tracker"}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => exportBatchICS([event], `${slugify(event.title)}.ics`)}
+                      title="Download .ics Calendar Event"
+                      className="rounded-xl border border-slate-800 bg-slate-950 p-2 text-slate-400 transition hover:border-slate-700 hover:text-slate-200"
+                    >
+                      <Calendar className="h-3.5 w-3.5" />
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => onCheckin(event.id)}
+                      title="Generate offline verification pass"
+                      className="rounded-xl border border-indigo-500/30 bg-indigo-950/40 p-2 text-indigo-300 transition hover:bg-indigo-900/60"
+                    >
+                      <QrCode className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </div>
+              </article>
+            );
+          })}
+        </div>
       )}
     </div>
   );
 }
 
-function FilterGroup<T extends string>({
-  label,
-  options,
-  value,
-  onChange,
+/* -------------------------------------------------------------------------- */
+/*  Tracker Tab (My Applications & Tracker Dashboard)                         */
+/* -------------------------------------------------------------------------- */
+
+function TrackerTab({
+  eventsById,
+  applications,
+  student,
+  onUpdateStatus,
+  onRemoveApplication,
+  onGoToCheckin,
 }: {
-  label: string;
-  options: T[];
-  value: T;
-  onChange: (next: T) => void;
+  eventsById: Map<string, EventItem>;
+  applications: StudentApplication[];
+  student: StudentProfile | null;
+  onUpdateStatus: (id: number, status: ApplicationStatus) => Promise<void>;
+  onRemoveApplication: (id: number) => Promise<void>;
+  onGoToCheckin: (eventId: string) => void;
 }) {
+  const [statusFilter, setStatusFilter] = useState<"All" | ApplicationStatus>("All");
+
+  const appliedEvents = useMemo(() => {
+    return applications
+      .map((app) => ({
+        app,
+        event: eventsById.get(app.eventId),
+      }))
+      .filter((item): item is { app: StudentApplication; event: EventItem } => Boolean(item.event));
+  }, [applications, eventsById]);
+
+  const filtered = useMemo(() => {
+    if (statusFilter === "All") return appliedEvents;
+    return appliedEvents.filter((item) => item.app.status === statusFilter);
+  }, [appliedEvents, statusFilter]);
+
+  const handleExportAllApplicationsICS = () => {
+    const list = appliedEvents.map((item) => item.event);
+    exportBatchICS(list, `${student?.fullName ? slugify(student.fullName) : "Student"}_Applied_Schedule.ics`);
+  };
+
   return (
-    <div
-      role="group"
-      aria-label={label}
-      className="flex flex-wrap items-center gap-2"
-    >
-      <span className="text-xs text-slate-500">{label}</span>
-      {options.map((option) => (
-        <button
-          key={option}
-          type="button"
-          aria-pressed={value === option}
-          onClick={() => onChange(option)}
-          className={clsx(
-            "rounded-full border px-3 py-1 text-xs font-medium transition",
-            value === option
-              ? "border-indigo-500 bg-indigo-600 text-white"
-              : "border-slate-800 bg-slate-950 text-slate-400 hover:border-slate-700 hover:text-slate-200",
+    <div className="space-y-6">
+      {/* Tracker Overview & Export Header */}
+      <div className="rounded-2xl border border-slate-800/80 bg-slate-900/90 p-6 shadow-sm">
+        <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="text-xl font-bold text-white sm:text-2xl">
+                My Applications & Tracker
+              </h2>
+              <span className="rounded-full bg-indigo-500/15 border border-indigo-500/30 px-2.5 py-0.5 text-xs font-semibold text-indigo-300">
+                {applications.length} Saved
+              </span>
+            </div>
+            <p className="mt-1 text-sm text-slate-400">
+              Manage your registered hackathons, shortlisted teams, offline venue passes, and attended events.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              disabled={appliedEvents.length === 0}
+              onClick={handleExportAllApplicationsICS}
+              className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-indigo-600 to-indigo-500 px-4 py-2.5 text-xs font-semibold text-white shadow-md shadow-indigo-600/20 transition hover:from-indigo-500 hover:to-indigo-400 disabled:opacity-50"
+            >
+              <Download className="h-4 w-4" />
+              <span>Export All Applied (.ics)</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Quick Filter Status Badges */}
+        <div className="mt-6 flex flex-wrap gap-2 border-t border-slate-800/60 pt-4 text-xs">
+          <span className="self-center font-semibold uppercase tracking-wider text-slate-500 mr-2">
+            Status:
+          </span>
+          {(["All", "Applied / Registered", "Shortlisted", "Offline Pass Ready", "Attended"] as const).map(
+            (status) => {
+              const count =
+                status === "All"
+                  ? applications.length
+                  : applications.filter((a) => a.status === status).length;
+              return (
+                <button
+                  key={status}
+                  type="button"
+                  onClick={() => setStatusFilter(status)}
+                  className={clsx(
+                    "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 font-medium transition",
+                    statusFilter === status
+                      ? "border-indigo-500 bg-indigo-600 text-white"
+                      : "border-slate-800 bg-slate-950 text-slate-400 hover:border-slate-700 hover:text-slate-200",
+                  )}
+                >
+                  <span>{status}</span>
+                  <span className="rounded-full bg-slate-800 px-1.5 py-0.2 text-[10px] text-slate-300">
+                    {count}
+                  </span>
+                </button>
+              );
+            },
           )}
-        >
-          {option}
-        </button>
-      ))}
+        </div>
+      </div>
+
+      {/* Applications Cards List */}
+      {filtered.length === 0 ? (
+        <div className="rounded-2xl border border-dashed border-slate-800 bg-slate-900/50 p-12 text-center">
+          <BookmarkCheck className="mx-auto h-10 w-10 text-slate-600" />
+          <h3 className="mt-3 text-base font-semibold text-slate-200">No applications found in this view</h3>
+          <p className="mt-1 text-sm text-slate-400">
+            Head to the Opportunity Aggregator tab to explore hackathons and click "Save to Tracker".
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {filtered.map(({ app, event }) => {
+            const statusMeta = STATUS_CONFIG[app.status];
+            const sourceStyle = SOURCE_BADGES[event.sourceBadge];
+
+            return (
+              <div
+                key={app.id ?? event.id}
+                className="flex flex-col justify-between gap-4 rounded-2xl border border-slate-800/80 bg-slate-900/90 p-5 shadow-sm transition hover:border-slate-700 md:flex-row md:items-center"
+              >
+                {/* Event & Application Info */}
+                <div className="min-w-0 flex-1 space-y-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span
+                      className={clsx(
+                        "rounded-full border px-2.5 py-0.5 text-xs font-bold",
+                        sourceStyle.bg,
+                        sourceStyle.text,
+                        sourceStyle.border,
+                      )}
+                    >
+                      {event.sourceBadge}
+                    </span>
+
+                    <span
+                      className={clsx(
+                        "rounded-full border px-2.5 py-0.5 text-xs font-semibold",
+                        statusMeta.bg,
+                        statusMeta.text,
+                        statusMeta.border,
+                      )}
+                    >
+                      {app.status}
+                    </span>
+
+                    <span className="text-xs text-slate-500">
+                      Applied on {dateFmt.format(new Date(app.appliedAt))}
+                    </span>
+                  </div>
+
+                  <h3 className="text-base font-bold text-white">{event.title}</h3>
+                  <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-400">
+                    <span>
+                      📅 <strong>Schedule:</strong> {formatWhen(event.startsAt, event.endsAt)}
+                    </span>
+                    <span>
+                      📍 <strong>Venue:</strong> {event.location} ({event.city})
+                    </span>
+                    {app.teamName && (
+                      <span>
+                        👥 <strong>Team:</strong> {app.teamName}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Status Switcher & Action Buttons */}
+                <div className="flex flex-wrap items-center gap-2">
+                  {/* Status Dropdown */}
+                  <select
+                    value={app.status}
+                    onChange={(e) => {
+                      if (app.id) {
+                        void onUpdateStatus(app.id, e.target.value as ApplicationStatus);
+                      }
+                    }}
+                    className="rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-xs font-medium text-slate-200 focus:border-indigo-500 focus:outline-none"
+                  >
+                    <option value="Applied / Registered">Status: Applied / Registered</option>
+                    <option value="Shortlisted">Status: Shortlisted</option>
+                    <option value="Offline Pass Ready">Status: Offline Pass Ready</option>
+                    <option value="Attended">Status: Attended</option>
+                  </select>
+
+                  {/* Pass Quick Link */}
+                  <button
+                    type="button"
+                    onClick={() => onGoToCheckin(event.id)}
+                    className="inline-flex items-center gap-1.5 rounded-xl border border-indigo-500/30 bg-indigo-950/40 px-3 py-2 text-xs font-semibold text-indigo-300 transition hover:bg-indigo-900/60"
+                  >
+                    <QrCode className="h-3.5 w-3.5" />
+                    <span>Venue Pass</span>
+                  </button>
+
+                  {/* Individual .ics Export */}
+                  <button
+                    type="button"
+                    onClick={() => exportBatchICS([event], `${slugify(event.title)}.ics`)}
+                    title="Export event to calendar"
+                    className="rounded-xl border border-slate-800 bg-slate-950 p-2 text-slate-400 transition hover:border-slate-700 hover:text-white"
+                  >
+                    <Calendar className="h-4 w-4" />
+                  </button>
+
+                  {/* Host Apply Link */}
+                  <a
+                    href={event.applyUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title={`Open ${event.sourceBadge} portal`}
+                    className="rounded-xl border border-slate-800 bg-slate-950 p-2 text-slate-400 transition hover:border-slate-700 hover:text-white"
+                  >
+                    <ExternalLink className="h-4 w-4" />
+                  </a>
+
+                  {/* Remove Button */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (app.id) void onRemoveApplication(app.id);
+                    }}
+                    title="Remove from tracker"
+                    className="rounded-xl border border-slate-800 bg-slate-950 p-2 text-slate-400 transition hover:border-rose-500/40 hover:text-rose-400"
+                  >
+                    <LogOut className="h-4 w-4 rotate-180" />
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
 
-function EventCard({
-  event,
-  onCheckin,
-}: {
-  event: EventItem;
-  onCheckin: (eventId: string) => void;
-}) {
-  const seatsLeft = Math.max(0, event.capacity - event.registered);
-  const fill = Math.min(
-    100,
-    Math.round((event.registered / event.capacity) * 100),
-  );
-
-  return (
-    <article className="flex h-full flex-col rounded-xl border border-slate-800 bg-slate-900 p-5 transition-colors hover:border-slate-700">
-      <div className="flex flex-wrap items-center gap-2">
-        <span
-          className={clsx(
-            "rounded-full border px-2.5 py-0.5 text-xs font-medium",
-            CATEGORY_STYLES[event.category],
-          )}
-        >
-          {event.category}
-        </span>
-        <span className="inline-flex items-center gap-1 rounded-full border border-slate-800 bg-slate-950 px-2.5 py-0.5 text-xs text-slate-400">
-          {event.mode === "Online" ? (
-            <Globe className="h-3 w-3" aria-hidden />
-          ) : (
-            <MapPin className="h-3 w-3" aria-hidden />
-          )}
-          {event.mode}
-        </span>
-        <span
-          className={clsx(
-            "rounded-full border px-2.5 py-0.5 text-xs font-medium",
-            event.feeInINR === 0
-              ? "border-emerald-400/40 bg-emerald-400/10 text-emerald-400"
-              : "border-slate-700 bg-slate-950 text-slate-200",
-          )}
-        >
-          {formatFee(event.feeInINR)}
-        </span>
-      </div>
-
-      <h3 className="mt-3 text-lg font-semibold text-slate-100">
-        {event.title}
-      </h3>
-      <p className="mt-1.5 line-clamp-3 text-sm leading-relaxed text-slate-400">
-        {event.description}
-      </p>
-
-      <dl className="mt-4 space-y-1.5 text-sm text-slate-300">
-        <div className="flex items-start gap-2">
-          <dt className="sr-only">When</dt>
-          <Clock
-            className="mt-0.5 h-4 w-4 shrink-0 text-slate-500"
-            aria-hidden
-          />
-          <dd>{formatWhen(event.startsAt, event.endsAt)}</dd>
-        </div>
-        <div className="flex items-start gap-2">
-          <dt className="sr-only">Where</dt>
-          <MapPin
-            className="mt-0.5 h-4 w-4 shrink-0 text-slate-500"
-            aria-hidden
-          />
-          <dd>
-            {event.location}, {event.stateRegion}
-            {event.platform ? ` · via ${event.platform}` : ""}
-          </dd>
-        </div>
-      </dl>
-
-      <ul className="mt-4 flex flex-wrap gap-1.5" aria-label="Tags">
-        {event.tags.map((tag) => (
-          <li
-            key={tag}
-            className="rounded-md bg-slate-950 px-2 py-0.5 text-xs text-slate-400"
-          >
-            {tag}
-          </li>
-        ))}
-      </ul>
-
-      <div className="mt-5">
-        <div className="flex items-center justify-between text-xs text-slate-400">
-          <span>{event.registered.toLocaleString("en-IN")} registered</span>
-          <span>
-            {seatsLeft === 0
-              ? "Full"
-              : `${seatsLeft.toLocaleString("en-IN")} spots left`}
-          </span>
-        </div>
-        <div
-          className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-slate-800"
-          role="img"
-          aria-label={`${fill}% of capacity registered`}
-        >
-          <div
-            className="h-full rounded-full bg-indigo-600"
-            style={{ width: `${fill}%` }}
-          />
-        </div>
-      </div>
-
-      <div className="mt-5 flex flex-wrap gap-2 pt-1">
-        <button
-          type="button"
-          onClick={() => downloadICS(event)}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm font-medium text-slate-200 transition hover:border-slate-700"
-        >
-          <CalendarPlus className="h-4 w-4" aria-hidden />
-          Add to calendar
-        </button>
-        <button
-          type="button"
-          onClick={() => onCheckin(event.id)}
-          className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500"
-        >
-          <UserCheck className="h-4 w-4" aria-hidden />
-          Check in
-        </button>
-      </div>
-    </article>
-  );
-}
-
 /* -------------------------------------------------------------------------- */
-/*  Check-in terminal                                                         */
+/*  Venue Offline Check-In Tab (Challenge Card Engine)                        */
 /* -------------------------------------------------------------------------- */
 
-function StatusChip({
-  status,
-  serverResult,
-}: {
-  status: CheckinStatus;
-  serverResult?: "accepted" | "duplicate";
-}) {
-  if (status === "synced") {
-    return (
-      <span className="inline-flex items-center gap-1 rounded-full border border-emerald-400/40 bg-emerald-400/10 px-2.5 py-0.5 text-xs font-medium text-emerald-400">
-        <CheckCircle2 className="h-3 w-3" aria-hidden />
-        {serverResult === "duplicate"
-          ? "Verified, already on record"
-          : "Verified by server"}
-      </span>
-    );
-  }
-  if (status === "syncing") {
-    return (
-      <span className="inline-flex items-center gap-1 rounded-full border border-amber-400/40 bg-amber-400/10 px-2.5 py-0.5 text-xs font-medium text-amber-400">
-        <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
-        Syncing
-      </span>
-    );
-  }
-  if (status === "rejected") {
-    return (
-      <span className="inline-flex items-center gap-1 rounded-full border border-rose-400/40 bg-rose-400/10 px-2.5 py-0.5 text-xs font-medium text-rose-400">
-        <AlertTriangle className="h-3 w-3" aria-hidden />
-        Rejected
-      </span>
-    );
-  }
-  return (
-    <span className="inline-flex items-center gap-1 rounded-full border border-amber-400/40 bg-amber-400/10 px-2.5 py-0.5 text-xs font-medium text-amber-400">
-      <Clock className="h-3 w-3" aria-hidden />
-      Saved on device
-    </span>
-  );
-}
-
-function CheckinTab({
+function VenueCheckinTab({
   events,
   eventsById,
   wallet,
+  student,
   isOnline,
   preselectedEventId,
   enqueueCheckin,
@@ -1016,13 +1601,14 @@ function CheckinTab({
   events: EventItem[];
   eventsById: Map<string, EventItem>;
   wallet: PendingCheckin[];
+  student: StudentProfile | null;
   isOnline: boolean;
   preselectedEventId: string;
   enqueueCheckin: (input: CheckinInput) => Promise<EnqueueResult>;
 }) {
   const [eventId, setEventId] = useState(preselectedEventId);
-  const [attendeeName, setAttendeeName] = useState("");
-  const [attendeeEmail, setAttendeeEmail] = useState("");
+  const [attendeeName, setAttendeeName] = useState(student?.fullName || "");
+  const [attendeeEmail, setAttendeeEmail] = useState(student?.rollNoOrEmail || "");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -1041,37 +1627,32 @@ function CheckinTab({
     if (!eventId && sortedEvents.length > 0) setEventId(sortedEvents[0].id);
   }, [eventId, sortedEvents]);
 
-  const livePass = useMemo(
-    () =>
-      activeKey
-        ? (wallet.find((item) => item.idempotencyKey === activeKey) ?? null)
-        : null,
-    [wallet, activeKey],
-  );
+  useEffect(() => {
+    if (student) {
+      if (!attendeeName) setAttendeeName(student.fullName);
+      if (!attendeeEmail) setAttendeeEmail(student.rollNoOrEmail);
+    }
+  }, [student, attendeeName, attendeeEmail]);
 
-  function fillDemoAttendee() {
-    const name = DEMO_NAMES[Math.floor(Math.random() * DEMO_NAMES.length)];
-    const suffix = Math.floor(Math.random() * 900) + 100;
-    setAttendeeName(name);
-    setAttendeeEmail(
-      `${name.toLowerCase().replace(/[^a-z]+/g, ".")}${suffix}@example.com`,
-    );
-    setError(null);
-  }
+  const livePass = useMemo(() => {
+    if (activeKey) {
+      return wallet.find((item) => item.idempotencyKey === activeKey) ?? null;
+    }
+    return wallet.length > 0 ? wallet[0] : null;
+  }, [wallet, activeKey]);
 
-  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
     setNotice(null);
 
     const name = attendeeName.trim();
     const email = attendeeEmail.trim();
-    if (!eventId) return setError("Choose an event to check in to.");
-    if (name.length < 2) return setError("Enter the attendee's full name.");
-    if (!EMAIL_RE.test(email))
-      return setError(
-        "Enter a valid email address, for example name@example.com.",
-      );
+    if (!eventId) return setError("Please select an event to generate a venue pass.");
+    if (name.length < 2) return setError("Please enter your full name.");
+    if (!EMAIL_RE.test(email)) {
+      return setError("Please provide a valid email format (e.g. rollno@college.edu or student@example.com).");
+    }
 
     setSubmitting(true);
     try {
@@ -1082,23 +1663,17 @@ function CheckinTab({
       });
       setActiveKey(checkin.idempotencyKey);
       if (existed) {
-        setNotice(
-          "This attendee is already checked in for this event. Showing the existing pass.",
-        );
+        setNotice("Attendee already registered locally! Showing your saved pass.");
       } else {
         setNotice(
           isOnline
-            ? "Checked in. Confirming with the server now."
-            : "Checked in on this device. It will sync automatically when the connection returns.",
+            ? "Pass recorded & synced with cloud server!"
+            : "Offline Pass created & saved to Dexie IndexedDB! Will sync when connection resumes.",
         );
         fireConfetti();
-        setAttendeeName("");
-        setAttendeeEmail("");
       }
     } catch {
-      setError(
-        "Couldn't save this check-in on the device. Check that browser storage is allowed, then try again.",
-      );
+      setError("Failed to save check-in to local IndexedDB. Check storage permissions.");
     } finally {
       setSubmitting(false);
     }
@@ -1106,180 +1681,176 @@ function CheckinTab({
 
   return (
     <div className="grid gap-6 lg:grid-cols-5">
+      {/* Left 3 cols: Terminal Form & Device Storage List */}
       <div className="space-y-6 lg:col-span-3">
-        <form
-          onSubmit={handleSubmit}
-          noValidate
-          className="space-y-4 rounded-xl border border-slate-800 bg-slate-900 p-5"
-        >
+        {/* Terminal Header Card */}
+        <div className="rounded-2xl border border-slate-800/80 bg-slate-900/90 p-5 shadow-sm">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <h2 className="text-base font-semibold text-slate-100">
-                Check in an attendee
+              <div className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-0.5 text-xs font-semibold text-emerald-400">
+                <ShieldCheck className="h-3.5 w-3.5" />
+                <span>Phase 2 Offline Dexie Sync Engine</span>
+              </div>
+              <h2 className="mt-2 text-lg font-bold text-white">
+                Venue Offline Check-In & Entry Verification
               </h2>
-              <p className="mt-1 text-sm text-slate-400">
-                Saved on this device first, so it works with no signal. The pass
-                appears instantly.
+              <p className="mt-1 text-xs text-slate-400">
+                Works 100% offline at zero-network hackathon venues. Creates tamper-evident SHA-256 QR passes stored locally in Dexie IndexedDB.
               </p>
             </div>
-            <button
-              type="button"
-              onClick={fillDemoAttendee}
-              className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-800 bg-slate-950 px-2.5 py-1.5 text-xs font-medium text-slate-300 hover:border-slate-700"
-            >
-              <Sparkles className="h-3.5 w-3.5" aria-hidden />
-              Fill demo attendee
-            </button>
           </div>
 
-          <div>
-            <label
-              htmlFor="checkin-event"
-              className="block text-sm font-medium text-slate-300"
-            >
-              Event
-            </label>
-            <select
-              id="checkin-event"
-              value={eventId}
-              onChange={(e) => setEventId(e.target.value)}
-              className="mt-1.5 w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2.5 text-sm text-slate-100 focus:border-indigo-500"
-            >
-              {sortedEvents.map((event) => (
-                <option key={event.id} value={event.id}>
-                  {event.title} ({event.mode})
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="grid gap-4 sm:grid-cols-2">
+          <form onSubmit={handleSubmit} className="mt-5 space-y-4">
             <div>
-              <label
-                htmlFor="checkin-name"
-                className="block text-sm font-medium text-slate-300"
-              >
-                Full name
+              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
+                Select Hackathon / Event
               </label>
-              <input
-                id="checkin-name"
-                value={attendeeName}
-                onChange={(e) => setAttendeeName(e.target.value)}
-                autoComplete="name"
-                placeholder="Aarav Mehta"
-                className="mt-1.5 w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2.5 text-sm text-slate-100 placeholder:text-slate-600 focus:border-indigo-500"
-              />
-            </div>
-            <div>
-              <label
-                htmlFor="checkin-email"
-                className="block text-sm font-medium text-slate-300"
+              <select
+                value={eventId}
+                onChange={(e) => setEventId(e.target.value)}
+                className="mt-1.5 w-full rounded-xl border border-slate-800 bg-slate-950 px-3.5 py-2.5 text-sm text-slate-100 focus:border-indigo-500 focus:outline-none"
               >
-                Email
-              </label>
-              <input
-                id="checkin-email"
-                type="email"
-                value={attendeeEmail}
-                onChange={(e) => setAttendeeEmail(e.target.value)}
-                autoComplete="email"
-                placeholder="aarav@example.com"
-                className="mt-1.5 w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2.5 text-sm text-slate-100 placeholder:text-slate-600 focus:border-indigo-500"
-              />
+                {sortedEvents.map((ev) => (
+                  <option key={ev.id} value={ev.id}>
+                    [{ev.sourceBadge}] {ev.title} ({ev.mode})
+                  </option>
+                ))}
+              </select>
             </div>
-          </div>
 
-          {error && (
-            <p
-              role="alert"
-              className="flex items-start gap-2 rounded-lg border border-rose-400/30 bg-rose-400/10 px-3 py-2 text-sm text-rose-400"
-            >
-              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
-              {error}
-            </p>
-          )}
-          {notice && !error && (
-            <p
-              role="status"
-              className={clsx(
-                "flex items-start gap-2 rounded-lg border px-3 py-2 text-sm",
-                isOnline
-                  ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-400"
-                  : "border-amber-400/30 bg-amber-400/10 text-amber-400",
-              )}
-            >
-              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
-              {notice}
-            </p>
-          )}
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
+                  Student Full Name
+                </label>
+                <input
+                  type="text"
+                  value={attendeeName}
+                  onChange={(e) => setAttendeeName(e.target.value)}
+                  placeholder="e.g. Aarav Sharma"
+                  className="mt-1.5 w-full rounded-xl border border-slate-800 bg-slate-950 px-3.5 py-2.5 text-sm text-slate-100 placeholder:text-slate-600 focus:border-indigo-500 focus:outline-none"
+                  required
+                />
+              </div>
 
-          <button
-            type="submit"
-            disabled={submitting || events.length === 0}
-            className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-500"
-          >
-            {submitting ? (
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-            ) : (
-              <UserCheck className="h-4 w-4" aria-hidden />
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
+                  Registered Email
+                </label>
+                <input
+                  type="email"
+                  value={attendeeEmail}
+                  onChange={(e) => setAttendeeEmail(e.target.value)}
+                  placeholder="e.g. aarav@college.edu"
+                  className="mt-1.5 w-full rounded-xl border border-slate-800 bg-slate-950 px-3.5 py-2.5 text-sm text-slate-100 placeholder:text-slate-600 focus:border-indigo-500 focus:outline-none"
+                  required
+                />
+              </div>
+            </div>
+
+            {error && (
+              <p className="flex items-center gap-2 rounded-xl border border-rose-500/40 bg-rose-500/10 p-3 text-xs text-rose-300">
+                <AlertTriangle className="h-4 w-4 shrink-0" />
+                <span>{error}</span>
+              </p>
             )}
-            Check in
-          </button>
-        </form>
 
-        <div className="rounded-xl border border-slate-800 bg-slate-900 p-5">
-          <h2 className="flex items-center gap-2 text-base font-semibold text-slate-100">
-            <Ticket className="h-4 w-4 text-slate-400" aria-hidden />
-            Check-ins on this device
-          </h2>
+            {notice && !error && (
+              <p className="flex items-center gap-2 rounded-xl border border-emerald-500/40 bg-emerald-500/10 p-3 text-xs text-emerald-300">
+                <CheckCircle2 className="h-4 w-4 shrink-0" />
+                <span>{notice}</span>
+              </p>
+            )}
+
+            <button
+              type="submit"
+              disabled={submitting}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-indigo-600 to-indigo-500 py-3 text-sm font-semibold text-white shadow-lg shadow-indigo-600/25 transition hover:from-indigo-500 hover:to-indigo-400 disabled:opacity-50"
+            >
+              {submitting ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <QrCode className="h-4 w-4" />
+              )}
+              <span>Generate Offline Verification Pass</span>
+            </button>
+          </form>
+        </div>
+
+        {/* Local Passes in IndexedDB */}
+        <div className="rounded-2xl border border-slate-800/80 bg-slate-900/90 p-5 shadow-sm">
+          <div className="flex items-center justify-between">
+            <h3 className="flex items-center gap-2 text-sm font-bold text-white">
+              <Ticket className="h-4 w-4 text-indigo-400" />
+              <span>Offline Verified Passes on this Device</span>
+            </h3>
+            <span className="text-xs text-slate-400">
+              {wallet.length} pass{wallet.length === 1 ? "" : "es"}
+            </span>
+          </div>
+
           {wallet.length === 0 ? (
-            <p className="mt-3 text-sm text-slate-400">
-              Nothing here yet. Complete a check-in above and the pass is stored
-              on this device.
+            <p className="mt-3 text-xs text-slate-500">
+              No passes generated on this device yet. Complete the form above to generate your offline entry pass.
             </p>
           ) : (
-            <ul className="mt-3 divide-y divide-slate-800">
-              {wallet.map((item) => (
-                <li
-                  key={item.idempotencyKey}
-                  className="flex flex-wrap items-center justify-between gap-3 py-3"
-                >
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium text-slate-100">
-                      {item.attendeeName}
-                    </p>
-                    <p className="truncate text-xs text-slate-400">
-                      {eventsById.get(item.eventId)?.title ?? item.eventId} ·{" "}
-                      {formatClock(item.checkedInAt)}
-                    </p>
-                    {item.status === "rejected" && item.lastError && (
-                      <p className="mt-1 text-xs text-rose-400">
-                        {item.lastError}
+            <ul className="mt-3 divide-y divide-slate-800/80">
+              {wallet.map((item) => {
+                const ev = eventsById.get(item.eventId);
+                const isSelected = activeKey === item.idempotencyKey;
+
+                return (
+                  <li
+                    key={item.idempotencyKey}
+                    className="flex flex-wrap items-center justify-between gap-3 py-3"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-white">
+                        {item.attendeeName}
                       </p>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <StatusChip
-                      status={item.status}
-                      serverResult={item.serverResult}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setActiveKey(item.idempotencyKey)}
-                      className="rounded-lg border border-slate-800 bg-slate-950 px-2.5 py-1 text-xs font-medium text-slate-300 hover:border-slate-700"
-                    >
-                      Show pass
-                    </button>
-                  </div>
-                </li>
-              ))}
+                      <p className="truncate text-xs text-slate-400">
+                        {ev?.title ?? item.eventId} · {formatClock(item.checkedInAt)}
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={clsx(
+                          "inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[11px] font-semibold",
+                          item.status === "synced"
+                            ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-400"
+                            : item.status === "rejected"
+                              ? "border-rose-500/40 bg-rose-500/10 text-rose-400"
+                              : "border-amber-500/40 bg-amber-500/10 text-amber-400",
+                        )}
+                      >
+                        {item.status === "synced" ? "Synced with Cloud" : "Saved in Dexie"}
+                      </span>
+
+                      <button
+                        type="button"
+                        onClick={() => setActiveKey(item.idempotencyKey)}
+                        className={clsx(
+                          "rounded-lg border px-2.5 py-1 text-xs font-semibold transition",
+                          isSelected
+                            ? "border-indigo-500 bg-indigo-600 text-white"
+                            : "border-slate-800 bg-slate-950 text-slate-300 hover:border-slate-700",
+                        )}
+                      >
+                        View Pass
+                      </button>
+                    </div>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>
       </div>
 
+      {/* Right 2 cols: Live Pass Card */}
       <aside className="lg:col-span-2">
-        <PassCard
+        <LiveStudentPassCard
           pass={livePass}
           event={livePass ? eventsById.get(livePass.eventId) : undefined}
         />
@@ -1288,7 +1859,11 @@ function CheckinTab({
   );
 }
 
-function PassCard({
+/* -------------------------------------------------------------------------- */
+/*  Live Student Pass Card with Tamper-Evident SHA-256 Hash                   */
+/* -------------------------------------------------------------------------- */
+
+function LiveStudentPassCard({
   pass,
   event,
 }: {
@@ -1297,464 +1872,89 @@ function PassCard({
 }) {
   if (!pass) {
     return (
-      <div className="rounded-xl border border-dashed border-slate-800 bg-slate-900 p-6 text-center lg:sticky lg:top-28">
-        <Ticket className="mx-auto h-8 w-8 text-slate-600" aria-hidden />
-        <p className="mt-3 text-sm font-medium text-slate-200">
-          Your pass will appear here
-        </p>
-        <p className="mt-1 text-sm text-slate-400">
-          Check in an attendee to generate a QR pass with a tamper-evident
-          ticket hash.
+      <div className="rounded-2xl border border-dashed border-slate-800 bg-slate-900/60 p-8 text-center lg:sticky lg:top-24">
+        <QrCode className="mx-auto h-12 w-12 text-slate-700" />
+        <h3 className="mt-3 text-sm font-semibold text-slate-300">
+          Venue Pass Preview
+        </h3>
+        <p className="mt-1 text-xs text-slate-500">
+          Select or generate a pass to see your tamper-evident QR code and verification badge.
         </p>
       </div>
     );
   }
 
-  const qrValue = `grevix://ticket?e=${encodeURIComponent(pass.eventId)}&k=${encodeURIComponent(pass.idempotencyKey)}&h=${pass.ticketHash}`;
+  const qrValue = `grevix://student-pass?e=${encodeURIComponent(pass.eventId)}&k=${encodeURIComponent(
+    pass.idempotencyKey,
+  )}&h=${pass.ticketHash}&s=${encodeURIComponent(pass.attendeeName)}`;
 
   return (
-    <div className="overflow-hidden rounded-xl border border-slate-800 bg-slate-900 lg:sticky lg:top-28">
-      <div className="border-b border-dashed border-slate-800 p-5">
-        <StatusChip status={pass.status} serverResult={pass.serverResult} />
-        <h2 className="mt-3 text-lg font-semibold text-slate-100">
+    <div className="overflow-hidden rounded-2xl border border-slate-800/80 bg-slate-900/90 shadow-xl lg:sticky lg:top-24">
+      {/* Header banner */}
+      <div className="border-b border-dashed border-slate-800/90 bg-gradient-to-br from-indigo-950/60 via-slate-900 to-slate-900 p-5">
+        <div className="flex items-center justify-between">
+          <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-0.5 text-xs font-bold text-emerald-400">
+            <ShieldCheck className="h-3.5 w-3.5" />
+            <span>Official Venue Pass</span>
+          </span>
+          <span className="text-[11px] font-semibold text-slate-400">
+            {event?.sourceBadge ?? "Event"}
+          </span>
+        </div>
+
+        <h3 className="mt-3 text-base font-bold text-white">
           {event?.title ?? pass.eventId}
-        </h2>
+        </h3>
         {event && (
-          <p className="mt-1 text-sm text-slate-400">
+          <p className="mt-1 text-xs text-slate-400">
             {formatWhen(event.startsAt, event.endsAt)}
           </p>
         )}
-        <p className="mt-4 text-base font-medium text-slate-100">
-          {pass.attendeeName}
-        </p>
-        <p className="text-sm text-slate-400">{pass.attendeeEmail}</p>
+
+        <div className="mt-4 rounded-xl border border-slate-800/80 bg-slate-950/80 p-3">
+          <p className="text-sm font-bold text-white">{pass.attendeeName}</p>
+          <p className="text-xs text-slate-400">{pass.attendeeEmail}</p>
+        </div>
       </div>
 
+      {/* QR Code and Cryptographic Verification Hash */}
       <div className="flex flex-col items-center gap-4 p-5">
-        <div className="rounded-xl bg-white p-3">
-          <QRCodeSVG
-            value={qrValue}
-            size={168}
-            level="M"
-            bgColor="#ffffff"
-            fgColor="#020617"
-          />
+        <div className="rounded-2xl bg-white p-3.5 shadow-md">
+          <QRCodeSVG value={qrValue} size={175} level="M" bgColor="#ffffff" fgColor="#020617" />
         </div>
-        <dl className="w-full space-y-2 text-xs">
-          <div className="flex justify-between gap-3">
-            <dt className="text-slate-500">Checked in</dt>
-            <dd className="text-slate-300">{formatClock(pass.checkedInAt)}</dd>
+
+        <div className="w-full space-y-2 text-xs">
+          <div className="flex justify-between gap-2 border-b border-slate-800/60 pb-1.5">
+            <span className="text-slate-500">Device Clock:</span>
+            <span className="text-slate-300 font-medium">{formatClock(pass.checkedInAt)}</span>
           </div>
-          <div className="flex justify-between gap-3">
-            <dt className="flex items-center gap-1 text-slate-500">
-              <ShieldCheck className="h-3.5 w-3.5" aria-hidden />
-              Ticket hash
-            </dt>
-            <dd
-              className="break-all text-right font-mono text-slate-300"
-              title={pass.ticketHash}
-            >
+
+          <div className="flex justify-between gap-2 border-b border-slate-800/60 pb-1.5">
+            <span className="text-slate-500 flex items-center gap-1">
+              <Lock className="h-3 w-3 text-indigo-400" />
+              <span>SHA-256 Ticket Hash:</span>
+            </span>
+            <span className="font-mono text-indigo-300" title={pass.ticketHash}>
               {shortHash(pass.ticketHash)}
-            </dd>
+            </span>
           </div>
-          {pass.syncedAt && (
-            <div className="flex justify-between gap-3">
-              <dt className="text-slate-500">Server confirmed</dt>
-              <dd className="text-emerald-400">{formatClock(pass.syncedAt)}</dd>
-            </div>
-          )}
-        </dl>
-        <p className="text-center text-xs text-slate-500">
-          {pass.status === "pending" || pass.status === "syncing"
-            ? "This pass is valid on this device now. Server confirmation follows when you're online."
-            : pass.status === "rejected"
-              ? "The server could not verify this check-in. Ask an organizer for help."
-              : "Confirmed by the organizer's server."}
-        </p>
-      </div>
-    </div>
-  );
-}
 
-/* -------------------------------------------------------------------------- */
-/*  Organizer dashboard                                                       */
-/* -------------------------------------------------------------------------- */
-
-function Stat({
-  label,
-  value,
-  hint,
-  tone,
-}: {
-  label: string;
-  value: string;
-  hint: string;
-  tone: "indigo" | "emerald" | "amber" | "slate";
-}) {
-  const toneClass = {
-    indigo: "text-indigo-300",
-    emerald: "text-emerald-400",
-    amber: "text-amber-400",
-    slate: "text-slate-100",
-  }[tone];
-  return (
-    <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
-      <p className="text-xs text-slate-400">{label}</p>
-      <p
-        className={clsx("mt-2 text-3xl font-semibold tabular-nums", toneClass)}
-      >
-        {value}
-      </p>
-      <p className="mt-1 text-xs text-slate-500">{hint}</p>
-    </div>
-  );
-}
-
-function DashboardTab({
-  events,
-  eventsById,
-  wallet,
-  isOnline,
-  syncStamp,
-}: {
-  events: EventItem[];
-  eventsById: Map<string, EventItem>;
-  wallet: PendingCheckin[];
-  isOnline: boolean;
-  syncStamp: string;
-}) {
-  const [analytics, setAnalytics] = useState<AnalyticsSnapshot | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  /* Show the last known figures immediately, even with no connection. */
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(ANALYTICS_CACHE_KEY);
-      if (raw) setAnalytics(JSON.parse(raw) as AnalyticsSnapshot);
-    } catch {
-      // Ignore unreadable cache.
-    }
-  }, []);
-
-  /* Live refresh while online, and right after each successful sync. */
-  useEffect(() => {
-    if (!isOnline) return;
-    let cancelled = false;
-
-    async function load() {
-      setLoading(true);
-      try {
-        const response = await fetch("/api/checkin/sync", {
-          cache: "no-store",
-        });
-        if (!response.ok)
-          throw new Error(`Analytics request failed with ${response.status}`);
-        const data = (await response.json()) as AnalyticsSnapshot;
-        if (cancelled) return;
-        setAnalytics(data);
-        setError(null);
-        try {
-          localStorage.setItem(ANALYTICS_CACHE_KEY, JSON.stringify(data));
-        } catch {
-          // Storage full or blocked. Fine.
-        }
-      } catch {
-        if (!cancelled)
-          setError(
-            "Couldn't reach the server. Showing the last known figures.",
-          );
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-
-    void load();
-    const interval = setInterval(load, 5000);
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
-  }, [isOnline, syncStamp]);
-
-  const queued = useMemo(
-    () =>
-      wallet.filter(
-        (item) => item.status === "pending" || item.status === "syncing",
-      ),
-    [wallet],
-  );
-  const queuedByEvent = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const item of queued)
-      map.set(item.eventId, (map.get(item.eventId) ?? 0) + 1);
-    return map;
-  }, [queued]);
-
-  const registrations =
-    analytics?.totals.registrations ??
-    events.reduce((sum, event) => sum + event.registered, 0);
-  const verified = analytics?.totals.verified ?? 0;
-  const pending = queued.length;
-  const conversion = registrations > 0 ? (verified / registrations) * 100 : 0;
-  const projected =
-    registrations > 0 ? ((verified + pending) / registrations) * 100 : 0;
-  const verifiedPct =
-    registrations > 0 ? Math.min(100, (verified / registrations) * 100) : 0;
-  const pendingPct =
-    registrations > 0
-      ? Math.min(100 - verifiedPct, (pending / registrations) * 100)
-      : 0;
-  const registrationRevenue =
-    analytics?.totals.registrationRevenueINR ??
-    events.reduce((sum, event) => sum + event.registered * event.feeInINR, 0);
-
-  const perEvent = useMemo(() => {
-    if (analytics) return analytics.perEvent;
-    return events.map((event) => ({
-      eventId: event.id,
-      title: event.title,
-      registered: event.registered,
-      verified: 0,
-      rate: 0,
-    }));
-  }, [analytics, events]);
-
-  return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h2 className="text-base font-semibold text-slate-100">
-            Attendance overview
-          </h2>
-          <p className="mt-1 text-sm text-slate-400">
-            Server-verified check-ins compared with check-ins still waiting on
-            devices.
-          </p>
-        </div>
-        <span
-          className={clsx(
-            "inline-flex items-center gap-1.5 text-xs",
-            isOnline ? "text-emerald-400" : "text-amber-400",
-          )}
-        >
-          {loading ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
-          ) : (
+          <div className="flex justify-between gap-2">
+            <span className="text-slate-500">Cloud Sync Status:</span>
             <span
               className={clsx(
-                "h-1.5 w-1.5 rounded-full",
-                isOnline ? "bg-emerald-400" : "bg-amber-400",
+                "font-semibold",
+                pass.status === "synced" ? "text-emerald-400" : "text-amber-400",
               )}
-              aria-hidden
-            />
-          )}
-          {isOnline
-            ? analytics
-              ? `Live, updated ${fmtTime(analytics.generatedAt)}`
-              : "Connecting..."
-            : analytics
-              ? `Offline. Last server figures from ${fmtTime(analytics.generatedAt)}`
-              : "Offline. Server figures load once you're connected."}
-        </span>
-      </div>
-
-      {error && (
-        <p
-          role="alert"
-          className="rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-sm text-amber-400"
-        >
-          {error}
-        </p>
-      )}
-
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <Stat
-          label="Total registrations"
-          value={registrations.toLocaleString("en-IN")}
-          hint="Across all events"
-          tone="slate"
-        />
-        <Stat
-          label="Verified attendance"
-          value={verified.toLocaleString("en-IN")}
-          hint="Confirmed by the server"
-          tone="emerald"
-        />
-        <Stat
-          label="Pending on this device"
-          value={pending.toLocaleString("en-IN")}
-          hint="Queued, not yet confirmed"
-          tone="amber"
-        />
-        <Stat
-          label="Conversion rate"
-          value={`${conversion.toFixed(1)}%`}
-          hint={
-            pending > 0
-              ? `${projected.toFixed(1)}% once the queue syncs`
-              : "Verified of registered"
-          }
-          tone="indigo"
-        />
-      </div>
-
-      <p className="text-sm text-slate-400">
-        Registration fees across all events:{" "}
-        <span className="font-medium tabular-nums text-slate-200">
-          {inrFmt.format(registrationRevenue)}
-        </span>
-      </p>
-
-      <div className="rounded-xl border border-slate-800 bg-slate-900 p-5">
-        <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400">
-          <span className="flex items-center gap-4">
-            <span className="inline-flex items-center gap-1.5">
-              <span
-                className="h-2 w-2 rounded-full bg-emerald-400"
-                aria-hidden
-              />{" "}
-              Verified
+            >
+              {pass.status === "synced" ? "Verified on Server" : "Cached locally in Dexie"}
             </span>
-            <span className="inline-flex items-center gap-1.5">
-              <span className="h-2 w-2 rounded-full bg-amber-400" aria-hidden />{" "}
-              Pending
-            </span>
-          </span>
-          <span>of {registrations.toLocaleString("en-IN")} registered</span>
-        </div>
-        <div
-          className="mt-3 flex h-3 overflow-hidden rounded-full bg-slate-800"
-          role="img"
-          aria-label={`${verified} verified and ${pending} pending out of ${registrations} registered`}
-        >
-          <div
-            className="bg-emerald-400 transition-[width] duration-500"
-            style={{ width: `${verifiedPct}%` }}
-          />
-          <div
-            className="bg-amber-400 transition-[width] duration-500"
-            style={{ width: `${pendingPct}%` }}
-          />
-        </div>
-      </div>
-
-      <div className="grid gap-6 lg:grid-cols-5">
-        <div className="overflow-hidden rounded-xl border border-slate-800 bg-slate-900 lg:col-span-3">
-          <h3 className="flex items-center gap-2 border-b border-slate-800 px-5 py-3 text-sm font-semibold text-slate-100">
-            <Users className="h-4 w-4 text-slate-400" aria-hidden />
-            By event
-          </h3>
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[520px] text-left text-sm">
-              <thead className="text-xs text-slate-500">
-                <tr>
-                  <th scope="col" className="px-5 py-2 font-medium">
-                    Event
-                  </th>
-                  <th scope="col" className="px-3 py-2 text-right font-medium">
-                    Registered
-                  </th>
-                  <th scope="col" className="px-3 py-2 text-right font-medium">
-                    Verified
-                  </th>
-                  <th scope="col" className="px-3 py-2 text-right font-medium">
-                    Pending here
-                  </th>
-                  <th scope="col" className="px-5 py-2 text-right font-medium">
-                    Rate
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800">
-                {perEvent.map((row) => (
-                  <tr key={row.eventId}>
-                    <td className="max-w-[16rem] truncate px-5 py-2.5 text-slate-200">
-                      {row.title}
-                    </td>
-                    <td className="px-3 py-2.5 text-right tabular-nums text-slate-400">
-                      {row.registered.toLocaleString("en-IN")}
-                    </td>
-                    <td className="px-3 py-2.5 text-right tabular-nums text-emerald-400">
-                      {row.verified}
-                    </td>
-                    <td className="px-3 py-2.5 text-right tabular-nums text-amber-400">
-                      {queuedByEvent.get(row.eventId) ?? 0}
-                    </td>
-                    <td className="px-5 py-2.5 text-right tabular-nums text-slate-300">
-                      {row.rate.toFixed(1)}%
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
           </div>
         </div>
 
-        <div className="overflow-hidden rounded-xl border border-slate-800 bg-slate-900 lg:col-span-2">
-          <h3 className="flex items-center gap-2 border-b border-slate-800 px-5 py-3 text-sm font-semibold text-slate-100">
-            <ShieldCheck className="h-4 w-4 text-slate-400" aria-hidden />
-            Live check-in ledger
-          </h3>
-          {queued.length === 0 &&
-          (!analytics || analytics.ledger.length === 0) ? (
-            <p className="p-5 text-sm text-slate-400">
-              No check-ins yet. Use the Check-In Terminal to record the first
-              one.
-            </p>
-          ) : (
-            <ul className="max-h-[28rem] divide-y divide-slate-800 overflow-y-auto">
-              {queued.map((item) => (
-                <li
-                  key={`q-${item.idempotencyKey}`}
-                  className="flex items-start justify-between gap-3 px-5 py-3"
-                >
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium text-slate-100">
-                      {item.attendeeName}
-                    </p>
-                    <p className="truncate text-xs text-slate-400">
-                      {eventsById.get(item.eventId)?.title ?? item.eventId}
-                    </p>
-                  </div>
-                  <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-amber-400/40 bg-amber-400/10 px-2 py-0.5 text-xs text-amber-400">
-                    <Clock className="h-3 w-3" aria-hidden />
-                    Waiting
-                  </span>
-                </li>
-              ))}
-              {analytics?.ledger.map((entry) => (
-                <li
-                  key={`s-${entry.idempotencyKey}`}
-                  className="flex items-start justify-between gap-3 px-5 py-3"
-                >
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium text-slate-100">
-                      {entry.attendeeName}
-                    </p>
-                    <p className="truncate text-xs text-slate-400">
-                      {entry.eventTitle} · {fmtTime(entry.checkedInAt)}
-                      {entry.offlineQueued
-                        ? ` · queued offline ${formatDelay(entry.delaySeconds)}`
-                        : ""}
-                    </p>
-                  </div>
-                  <span
-                    className={clsx(
-                      "inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-xs",
-                      entry.verified
-                        ? "border-emerald-400/40 bg-emerald-400/10 text-emerald-400"
-                        : "border-amber-400/40 bg-amber-400/10 text-amber-400",
-                    )}
-                  >
-                    <CheckCircle2 className="h-3 w-3" aria-hidden />
-                    {entry.verified ? "Verified" : "Hash unchecked"}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+        <p className="text-center text-[11px] text-slate-500">
+          This digital badge proves offline attendance legitimacy without waiting for venue WiFi connectivity.
+        </p>
       </div>
     </div>
   );

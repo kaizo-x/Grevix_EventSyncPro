@@ -2,10 +2,10 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  applicationName: "EventSync",
-  title: "EventSync India — Tech & Campus Events",
+  applicationName: "EventSync Pro",
+  title: "Grevix EventSyncPro — Student Opportunity Aggregator & Application Tracker",
   description:
-    "Discover hackathons, workshops and campus fests across India. Check in even when the network drops: nothing is ever lost.",
+    "Student-centric aggregator for Unstop, Devfolio, SIH, and campus hackathons with offline Dexie sync and application tracking.",
   manifest: "/manifest.json",
   icons: {
     icon: [

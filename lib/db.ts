@@ -19,6 +19,38 @@ export type RegionGroup =
   | "Virtual / Global"
   | "Other India";
 
+export type OpportunitySource =
+  | "Unstop"
+  | "Devfolio"
+  | "HackerEarth"
+  | "Campus"
+  | "SIH Portal"
+  | "Virtual";
+
+export type ApplicationStatus =
+  | "Applied / Registered"
+  | "Shortlisted"
+  | "Offline Pass Ready"
+  | "Attended";
+
+export interface StudentProfile {
+  fullName: string;
+  collegeName: string;
+  rollNoOrEmail: string;
+  degreeBranch?: string;
+  yearOfStudy?: string;
+}
+
+export interface StudentApplication {
+  id?: number;
+  eventId: string;
+  studentEmail: string;
+  status: ApplicationStatus;
+  appliedAt: string;
+  notes?: string;
+  teamName?: string;
+}
+
 export interface EventItem {
   id: string;
   title: string;
@@ -35,8 +67,10 @@ export interface EventItem {
   regionGroup: RegionGroup;
   /** Registration fee in Indian rupees. 0 means free. */
   feeInINR: number;
-  /** Registration platform, e.g. Unstop. */
+  /** Registration platform, e.g. Unstop, Devfolio, HackerEarth. */
   platform?: string;
+  sourceBadge: OpportunitySource;
+  applyUrl: string;
   /** ISO 8601 (UTC). Rendered in IST (Asia/Kolkata) by the UI. */
   startsAt: string;
   /** ISO 8601 (UTC). */
@@ -44,6 +78,7 @@ export interface EventItem {
   organizer: string;
   registered: number;
   capacity: number;
+  prizePool?: string;
 }
 
 /** An event row as stored in IndexedDB for offline discovery. */
@@ -122,6 +157,7 @@ export interface AnalyticsSnapshot {
 export class EventSyncDB extends Dexie {
   pendingCheckins!: Table<PendingCheckin, number>;
   cachedEvents!: Table<CachedEvent, string>;
+  applications!: Table<StudentApplication, number>;
 
   constructor() {
     super("grevix_eventsyncpro");
@@ -139,6 +175,14 @@ export class EventSyncDB extends Dexie {
         cachedEvents: "id, category, mode, regionGroup, startsAt",
       })
       .upgrade((tx) => tx.table("cachedEvents").clear());
+
+    // v3: student applications tracker
+    this.version(3)
+      .stores({
+        pendingCheckins: "++id, &idempotencyKey, eventId, status, checkedInAt",
+        cachedEvents: "id, category, mode, regionGroup, startsAt",
+        applications: "++id, &[eventId+studentEmail], eventId, studentEmail, status, appliedAt",
+      });
   }
 }
 
@@ -146,6 +190,42 @@ export class EventSyncDB extends Dexie {
 export const db = new EventSyncDB();
 
 export const UNSYNCED_STATUSES: CheckinStatus[] = ["pending", "syncing"];
+
+export async function getStudentApplications(studentEmail: string): Promise<StudentApplication[]> {
+  try {
+    return await db.applications.where("studentEmail").equalsIgnoreCase(studentEmail.trim()).toArray();
+  } catch {
+    return [];
+  }
+}
+
+export async function saveStudentApplication(app: Omit<StudentApplication, "id">): Promise<StudentApplication> {
+  const normalizedEmail = app.studentEmail.trim().toLowerCase();
+  const existing = await db.applications
+    .where({ eventId: app.eventId, studentEmail: normalizedEmail })
+    .first();
+
+  if (existing && existing.id) {
+    const updated: StudentApplication = { ...existing, ...app, studentEmail: normalizedEmail };
+    await db.applications.put(updated);
+    return updated;
+  }
+
+  const newApp: StudentApplication = { ...app, studentEmail: normalizedEmail };
+  const id = await db.applications.add(newApp);
+  return { ...newApp, id };
+}
+
+export async function updateApplicationStatus(
+  id: number,
+  status: ApplicationStatus,
+): Promise<void> {
+  await db.applications.update(id, { status });
+}
+
+export async function removeStudentApplication(id: number): Promise<void> {
+  await db.applications.delete(id);
+}
 
 /* -------------------------------------------------------------------------- */
 /*  Helpers                                                                   */
@@ -259,166 +339,179 @@ export function buildSeedEvents(): EventItem[] {
   return [
     {
       id: "evt-grevix-aftercode",
-      title: "Grevix AfterCode 24H Hackathon",
+      title: "Grevix AfterCode Solo Hackathon 2026",
       description:
-        "Build and ship a complete project solo in 24 hours. Register on Unstop, submit your repo and demo link, and get reviewed by mentors.",
+        "Build and ship a complete offline-first web/mobile project solo in 24 hours. Submit your GitHub repo & live deployment to win cash prizes and direct interview opportunities.",
       category: "Hackathons",
       mode: "Online",
-      tags: ["solo", "24-hour", "unstop", "web", "offline-first"],
-      location: "Unstop (online)",
+      tags: ["solo", "24-hour", "unstop", "offline-first", "nextjs", "dexie"],
+      location: "Unstop Virtual Arena",
       city: "Online",
       stateRegion: "Pan-India",
       regionGroup: "Virtual / Global",
       feeInINR: 0,
       platform: "Unstop",
+      sourceBadge: "Unstop",
+      applyUrl: "https://unstop.com/hackathons/grevix-aftercode-solo-2026",
+      prizePool: "₹1,50,000 Cash + Swag",
       ...istSlot(1, 10, 24),
-      organizer: "Grevix",
+      organizer: "Grevix Labs",
       registered: 4200,
       capacity: 5000,
     },
     {
-      id: "evt-sih-campus",
-      title: "Smart India Hackathon (SIH) Campus Selection",
+      id: "evt-sih-portal-2026",
+      title: "Smart India Hackathon 2026 (SIH Portal)",
       description:
-        "Internal college round to pick the teams that represent your campus. Pitch a solution to a problem statement and get shortlisted for the national stage.",
+        "India's premier nationwide innovation initiative by MoE. Solve real-world problem statements posed by central ministries, state departments, and top industries with a team of 6.",
       category: "Hackathons",
       mode: "In-Person",
-      tags: ["sih", "problem statements", "team of 6", "college round"],
-      location: "Your college campus (internal round)",
-      city: "Participating colleges",
+      tags: ["sih-2026", "ministry-problems", "team-of-6", "national-stage", "hardware-software"],
+      location: "SIH Portal & Designated Nodal Centers",
+      city: "Pan-India Centers",
       stateRegion: "Pan-India",
       regionGroup: "Other India",
       feeInINR: 0,
-      ...istSlot(5, 9, 8),
-      organizer: "College Innovation Cell",
-      registered: 320,
-      capacity: 400,
+      platform: "SIH Portal",
+      sourceBadge: "SIH Portal",
+      applyUrl: "https://www.sih.gov.in/",
+      prizePool: "₹1,00,000 per Problem Statement",
+      ...istSlot(5, 9, 36),
+      organizer: "Ministry of Education Innovation Cell",
+      registered: 35000,
+      capacity: 50000,
     },
     {
-      id: "evt-ruia-codecraft",
-      title: "Ruia CodeCraft & Web3 Workshop",
+      id: "evt-devfolio-winter-sprint",
+      title: "Devfolio Winter Hack Sprint 2026",
       description:
-        "Hands-on day covering smart contract basics and wallet integrations, followed by a short coding contest. Laptops required.",
-      category: "Workshops",
-      mode: "In-Person",
-      tags: ["web3", "solidity", "contest", "college"],
-      location: "Ruia College campus",
-      city: "Mumbai",
-      stateRegion: "Maharashtra",
-      regionGroup: "Mumbai / Pune",
-      feeInINR: 50,
-      ...istSlot(4, 10, 6),
-      organizer: "Ruia Coding Club",
-      registered: 140,
-      capacity: 180,
-    },
-    {
-      id: "evt-sahyadri-fort-hack",
-      title: "Sahyadri Fort Hack & Trek",
-      description:
-        "Hack through the night at a base camp, then trek up a Sahyadri fort at sunrise. Group transport from Pune is available.",
+        "Rapid 48-hour builder sprint across Web3, AI, and developer infrastructure tracks. Direct mentor office hours with tier-1 venture scouts and global devrel leads.",
       category: "Hackathons",
-      mode: "In-Person",
-      tags: ["trek", "overnight", "outdoors", "team"],
-      location: "Lonavala base camp, Pune district",
-      city: "Lonavala",
-      stateRegion: "Maharashtra",
-      regionGroup: "Mumbai / Pune",
-      feeInINR: 400,
-      ...istSlot(8, 18, 20),
-      organizer: "Sahyadri Dev Trekkers",
-      registered: 85,
-      capacity: 100,
-    },
-    {
-      id: "evt-aws-community-day",
-      title: "AWS Community Day India",
-      description:
-        "Community-run day of talks on cloud architecture, serverless and cost control. Attend in Bengaluru or follow the live stream.",
-      category: "Conferences",
-      mode: "Hybrid",
-      tags: ["aws", "cloud", "serverless", "community"],
-      location: "Bengaluru venue + live stream",
-      city: "Bengaluru",
-      stateRegion: "Karnataka",
-      regionGroup: "Bengaluru",
-      feeInINR: 200,
-      ...istSlot(13, 9, 9),
-      organizer: "AWS User Group India",
-      registered: 780,
-      capacity: 1000,
-    },
-    {
-      id: "evt-genai-apac",
-      title: "Global AI GenAI APAC Edition",
-      description:
-        "Virtual sessions for the Asia-Pacific time zones on building with generative AI: prompts, evaluation, retrieval and shipping to production.",
-      category: "Conferences",
       mode: "Online",
-      tags: ["genai", "llm", "apac", "virtual"],
-      location: "Virtual (APAC time zones)",
+      tags: ["devfolio", "web3", "ai-agents", "48-hours", "open-source"],
+      location: "Devfolio Portal",
+      city: "Online",
+      stateRegion: "Pan-India",
+      regionGroup: "Virtual / Global",
+      feeInINR: 0,
+      platform: "Devfolio",
+      sourceBadge: "Devfolio",
+      applyUrl: "https://devfolio.co/hackathons/winter-sprint-2026",
+      prizePool: "$20,000 USD Grants & Bounties",
+      ...istSlot(7, 18, 48),
+      organizer: "Devfolio Community",
+      registered: 2890,
+      capacity: 4000,
+    },
+    {
+      id: "evt-hackerearth-apac-cup",
+      title: "HackerEarth Collegiate Code Arena",
+      description:
+        "High-octane competitive programming challenge featuring algorithmic graph problems, dynamic programming, and systems design. Fast-track hiring interviews with top tech firms.",
+      category: "Hackathons",
+      mode: "Online",
+      tags: ["hackerearth", "dsa", "competitive-programming", "internships"],
+      location: "HackerEarth Platform",
       city: "Online",
       stateRegion: "Global",
       regionGroup: "Virtual / Global",
       feeInINR: 0,
-      ...istSlot(3, 15, 4),
-      organizer: "Global AI Community",
-      registered: 2600,
-      capacity: 5000,
+      platform: "HackerEarth",
+      sourceBadge: "HackerEarth",
+      applyUrl: "https://www.hackerearth.com/challenges/collegiate-arena-2026",
+      prizePool: "₹75,000 + Tech Interviews",
+      ...istSlot(3, 17, 3),
+      organizer: "HackerEarth Campus Network",
+      registered: 1840,
+      capacity: 3000,
     },
     {
-      id: "evt-pune-web-meetup",
-      title: "Pune Web Dev Meetup: Offline-First Apps",
+      id: "evt-ruia-techfest-2026",
+      title: "Ruia TechFest 2026 (Campus Flagship)",
       description:
-        "Lightning talks and a live demo on PWAs, service workers and IndexedDB sync. Pizza and networking afterwards.",
+        "Annual intercollegiate technical festival at Ramnarain Ruia College featuring Web3 sprint, robotics arena, code debugging marathon, and project exhibition showcase.",
+      category: "Fests",
+      mode: "In-Person",
+      tags: ["campus", "mumbai-colleges", "robotics", "project-expo", "web3"],
+      location: "Ruia College Campus, Matunga",
+      city: "Mumbai",
+      stateRegion: "Maharashtra",
+      regionGroup: "Mumbai / Pune",
+      feeInINR: 50,
+      platform: "Campus Registration Desk",
+      sourceBadge: "Campus",
+      applyUrl: "https://ruia.edu/techfest-2026",
+      prizePool: "₹60,000 Trophy & Certificates",
+      ...istSlot(4, 9, 8),
+      organizer: "Ruia Coding Club & Student Council",
+      registered: 620,
+      capacity: 800,
+    },
+    {
+      id: "evt-global-ai-apac-challenge",
+      title: "Global AI APAC Challenge (Google / Virtual)",
+      description:
+        "Build production-grade Multimodal AI applications and autonomous agents with Gemini 2.5 Flash and Google Cloud Vertex AI. Certified participation badge for all valid submissions.",
+      category: "Hackathons",
+      mode: "Online",
+      tags: ["google", "gemini-api", "apac", "genai", "vertex-ai"],
+      location: "Google Developer Groups (Virtual APAC)",
+      city: "Online",
+      stateRegion: "Global",
+      regionGroup: "Virtual / Global",
+      feeInINR: 0,
+      platform: "Google Virtual",
+      sourceBadge: "Virtual",
+      applyUrl: "https://developers.google.com/community/gdg/challenges/apac-ai",
+      prizePool: "$35,000 Google Cloud Credits",
+      ...istSlot(2, 14, 6),
+      organizer: "Google Developer Groups APAC",
+      registered: 5400,
+      capacity: 10000,
+    },
+    {
+      id: "evt-pune-campus-offline-meet",
+      title: "Pune Student DevCon & Open Source Jam",
+      description:
+        "Student-led developer summit covering Next.js 16, Service Worker PWA architectures, IndexedDB synchronization, and networking with tech founders.",
       category: "Meetups",
       mode: "In-Person",
-      tags: ["pwa", "indexeddb", "meetup", "networking"],
-      location: "Community co-working space",
+      tags: ["pune", "campus", "offline-first", "students", "networking"],
+      location: "COEP Tech Auditorium, Shivaji Nagar",
       city: "Pune",
       stateRegion: "Maharashtra",
       regionGroup: "Mumbai / Pune",
       feeInINR: 0,
-      ...istSlot(2, 18, 3, 30),
-      organizer: "Pune Web Devs",
-      registered: 64,
-      capacity: 80,
+      platform: "Campus Innovation Cell",
+      sourceBadge: "Campus",
+      applyUrl: "https://coep.ac.in/events/devcon-2026",
+      prizePool: "Swag Bags & Cloud Vouchers",
+      ...istSlot(6, 11, 5),
+      organizer: "COEP Open Source Circle",
+      registered: 210,
+      capacity: 300,
     },
     {
-      id: "evt-blr-frontend-night",
-      title: "Bengaluru Frontend Night",
+      id: "evt-blr-student-hack-sprint",
+      title: "Bengaluru Student AI Hackfest (HackerEarth)",
       description:
-        "Three talks on React performance, design systems and accessibility, with time to ask speakers questions over chai.",
-      category: "Meetups",
+        "48-hour prototype hackathon for engineering undergrads in Karnataka. Build resilient applications and showcase in front of Bengaluru tech leads.",
+      category: "Hackathons",
       mode: "In-Person",
-      tags: ["react", "design systems", "accessibility", "meetup"],
-      location: "Community space",
+      tags: ["hackerearth", "bengaluru", "students", "ai", "prototyping"],
+      location: "Koramangala Community Hub",
       city: "Bengaluru",
       stateRegion: "Karnataka",
       regionGroup: "Bengaluru",
-      feeInINR: 0,
-      ...istSlot(6, 18, 3, 30),
-      organizer: "Blr Frontend Folks",
-      registered: 150,
-      capacity: 200,
-    },
-    {
-      id: "evt-mumbai-intercollege-fest",
-      title: "Mumbai Inter-College Tech Fest",
-      description:
-        "Robotics arena, coding relay, gaming zone and a project expo hosted by colleges across Mumbai. Walk-ins welcome with a pass.",
-      category: "Fests",
-      mode: "In-Person",
-      tags: ["inter-college", "robotics", "expo", "gaming"],
-      location: "Host college grounds",
-      city: "Mumbai",
-      stateRegion: "Maharashtra",
-      regionGroup: "Mumbai / Pune",
       feeInINR: 100,
-      ...istSlot(10, 10, 9),
-      organizer: "Mumbai Student Council Alliance",
-      registered: 1800,
-      capacity: 2500,
+      platform: "HackerEarth",
+      sourceBadge: "HackerEarth",
+      applyUrl: "https://www.hackerearth.com/challenges/hackathon/blr-student-hack-2026",
+      prizePool: "₹1,20,000 Prize Fund",
+      ...istSlot(9, 10, 48),
+      organizer: "Bangalore Student Tech Chapter",
+      registered: 490,
+      capacity: 600,
     },
   ];
 }
