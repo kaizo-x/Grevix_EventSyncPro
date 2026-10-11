@@ -4,18 +4,34 @@ import Dexie, { type Table } from "dexie";
 /*  Types                                                                     */
 /* -------------------------------------------------------------------------- */
 
+export type EventStream =
+  | "Technology & Engineering"
+  | "Business & Management"
+  | "Arts, Design & Humanities"
+  | "Sciences & Mathematics"
+  | "Cross-Disciplinary";
+
 export type EventCategory =
   | "Hackathons"
   | "Workshops"
   | "Conferences"
   | "Fests"
-  | "Meetups";
+  | "Meetups"
+  | "Hackathon"
+  | "Workshop"
+  | "Competition"
+  | "Case Study"
+  | "Trading Challenge";
+
 export type EventMode = "Online" | "In-Person" | "Hybrid";
 
 /** Drives the region filter chips. "Other India" appears under "All India" only. */
 export type RegionGroup =
   | "Mumbai / Pune"
+  | "Delhi / NCR"
   | "Bengaluru"
+  | "All India"
+  | "Global / Online"
   | "Virtual / Global"
   | "Other India";
 
@@ -26,6 +42,9 @@ export type OpportunitySource =
   | "SIH Portal"
   | "AWS User Group"
   | "Google Developers"
+  | "NASA"
+  | "Kaggle"
+  | "IEEE"
   | "Campus"
   | "Virtual";
 
@@ -57,8 +76,11 @@ export interface EventItem {
   id: string;
   title: string;
   description: string;
+  organizer: string;
+  stream?: EventStream;
   category: EventCategory;
   mode: EventMode;
+  region?: RegionGroup;
   tags: string[];
   /** Venue or platform line shown on the card. */
   location: string;
@@ -69,15 +91,17 @@ export interface EventItem {
   regionGroup: RegionGroup;
   /** Registration fee in Indian rupees. 0 means free. */
   feeInINR: number;
+  feeINR?: number;
   /** Registration platform, e.g. Unstop, Devfolio, HackerEarth. */
   platform?: string;
   sourceBadge: OpportunitySource;
   applyUrl: string;
+  hostUrl?: string;
+  date?: string;
   /** ISO 8601 (UTC). Rendered in IST (Asia/Kolkata) by the UI. */
   startsAt: string;
   /** ISO 8601 (UTC). */
   endsAt: string;
-  organizer: string;
   registered: number;
   capacity: number;
   prizePool?: string;
@@ -358,6 +382,11 @@ export function buildSeedEvents(): EventItem[] {
       prizePool: "₹1,50,000 Cash Pool + Tech Interview Fastrack",
       ...istSlot(1, 10, 24),
       organizer: "Grevix Official",
+      stream: "Technology & Engineering",
+      region: "Global / Online",
+      hostUrl: "https://unstop.com/hackathons/grevix-aftercode-solo-2026",
+      feeINR: 0,
+      date: "October 12, 2026",
       registered: 4200,
       capacity: 5000,
     },
@@ -373,13 +402,18 @@ export function buildSeedEvents(): EventItem[] {
       city: "Pan-India Centers",
       stateRegion: "Pan-India",
       regionGroup: "Other India",
+      region: "All India",
       feeInINR: 0,
+      feeINR: 0,
       platform: "SIH Portal",
       sourceBadge: "SIH Portal",
       applyUrl: "https://www.sih.gov.in/",
+      hostUrl: "https://www.sih.gov.in/",
+      date: "December 2026",
       prizePool: "₹1,00,000 per Problem Statement",
       ...istSlot(5, 9, 36),
       organizer: "Ministry of Education (MoE) Innovation Cell",
+      stream: "Technology & Engineering",
       registered: 35000,
       capacity: 50000,
     },
@@ -395,13 +429,18 @@ export function buildSeedEvents(): EventItem[] {
       city: "Online",
       stateRegion: "Pan-India",
       regionGroup: "Virtual / Global",
+      region: "Global / Online",
       feeInINR: 0,
+      feeINR: 0,
       platform: "Devfolio",
       sourceBadge: "Devfolio",
       applyUrl: "https://devfolio.co/hackathons",
+      hostUrl: "https://devfolio.co/hackathons",
+      date: "Autumn 2026",
       prizePool: "$25,000 USD Bounties & Builder Grants",
       ...istSlot(7, 18, 48),
       organizer: "Devfolio Official",
+      stream: "Technology & Engineering",
       registered: 3200,
       capacity: 5000,
     },
@@ -417,13 +456,18 @@ export function buildSeedEvents(): EventItem[] {
       city: "Bengaluru",
       stateRegion: "Karnataka",
       regionGroup: "Bengaluru",
+      region: "Bengaluru",
       feeInINR: 250,
+      feeINR: 250,
       platform: "AWS User Group India",
       sourceBadge: "AWS User Group",
       applyUrl: "https://communityday.awsug.in/",
+      hostUrl: "https://communityday.awsug.in/",
+      date: "November 2026",
       prizePool: "AWS Cloud Credits & Certification Vouchers",
       ...istSlot(12, 9, 9),
       organizer: "AWS User Group India",
+      stream: "Technology & Engineering",
       registered: 1100,
       capacity: 1500,
     },
@@ -439,15 +483,354 @@ export function buildSeedEvents(): EventItem[] {
       city: "Online",
       stateRegion: "Global",
       regionGroup: "Virtual / Global",
+      region: "Global / Online",
       feeInINR: 0,
+      feeINR: 0,
       platform: "Google Developers",
       sourceBadge: "Google Developers",
       applyUrl: "https://developers.google.com/community/gdg",
+      hostUrl: "https://developers.google.com/community/gdg",
+      date: "October 2026",
       prizePool: "$35,000 USD Google Cloud Credits & Badges",
       ...istSlot(3, 14, 6),
       organizer: "Google Developers",
+      stream: "Technology & Engineering",
       registered: 5800,
       capacity: 10000,
+    },
+
+    /* --- 1. TECHNOLOGY & ENGINEERING --- */
+    {
+      id: "evt-adobe-univ-hackathon-2026",
+      title: "Adobe University Hackathon 2026",
+      organizer: "Adobe",
+      stream: "Technology & Engineering",
+      category: "Hackathon",
+      mode: "Online",
+      region: "Global / Online",
+      regionGroup: "Virtual / Global",
+      feeInINR: 0,
+      feeINR: 0,
+      hostUrl: "https://unstop.com",
+      applyUrl: "https://unstop.com",
+      date: "Open through Oct 16, 2026",
+      description:
+        "Build autonomous AI agents and intelligent brand solutions in a multi-stage online assessment and prototype build. Collaborate on cutting-edge design tools and generative pipelines.",
+      location: "Unstop Online Portal",
+      city: "Online",
+      stateRegion: "Global",
+      tags: ["adobe", "ai-agents", "hackathon", "unstop", "design-tech"],
+      sourceBadge: "Unstop",
+      platform: "Unstop",
+      prizePool: "Cash Grants & Adobe Subscriptions",
+      ...istSlot(4, 10, 48),
+      registered: 4950,
+      capacity: 8000,
+    },
+    {
+      id: "evt-nasa-space-apps-2026",
+      title: "NASA Space Apps Challenge 2026",
+      organizer: "NASA",
+      stream: "Technology & Engineering",
+      category: "Hackathon",
+      mode: "Hybrid",
+      region: "All India",
+      regionGroup: "All India",
+      feeInINR: 0,
+      feeINR: 0,
+      hostUrl: "https://spaceappschallenge.org",
+      applyUrl: "https://spaceappschallenge.org",
+      date: "November 15, 2026",
+      description:
+        "48-Hour Global Hackathon solving real-world Earth and space challenges using NASA open datasets. Work with multidisciplinary teams across astronomy, climate science, and orbital tracking.",
+      location: "Designated Local Leads across India & Virtual",
+      city: "Pan-India / Hybrid",
+      stateRegion: "Pan-India",
+      tags: ["nasa", "space-apps", "open-data", "satellite", "earth-science"],
+      sourceBadge: "NASA",
+      platform: "NASA Global Portal",
+      prizePool: "Global Winner Accolades & Kennedy Space Center Visit",
+      ...istSlot(15, 9, 48),
+      registered: 12500,
+      capacity: 20000,
+    },
+    {
+      id: "evt-sih-grand-finale-2026",
+      title: "Smart India Hackathon (SIH) 2026 Grand Finale",
+      organizer: "Ministry of Education & AICTE",
+      stream: "Technology & Engineering",
+      category: "Hackathon",
+      mode: "In-Person",
+      region: "All India",
+      regionGroup: "All India",
+      feeInINR: 0,
+      feeINR: 0,
+      hostUrl: "https://sih.gov.in",
+      applyUrl: "https://sih.gov.in",
+      date: "December 2026",
+      description:
+        "36-Hour continuous nation-building hackathon solving operational problems for central ministries and industries. Teams pitch to senior ministry delegates and technology leaders.",
+      location: "Selected Nodal Centers Across India",
+      city: "Pan-India Nodal Centers",
+      stateRegion: "Pan-India",
+      tags: ["sih", "grand-finale", "national", "hardware", "software"],
+      sourceBadge: "SIH Portal",
+      platform: "SIH Official Portal",
+      prizePool: "₹1,00,000 per Problem Statement Winner",
+      ...istSlot(20, 8, 36),
+      registered: 24000,
+      capacity: 35000,
+    },
+
+    /* --- 2. BUSINESS, MANAGEMENT & ECONOMICS --- */
+    {
+      id: "evt-green-innovation-challenge",
+      title: "Green Innovation Challenge",
+      organizer: "IIM Tiruchirappalli",
+      stream: "Business & Management",
+      category: "Case Study",
+      mode: "Hybrid",
+      region: "All India",
+      regionGroup: "All India",
+      feeInINR: 0,
+      feeINR: 0,
+      hostUrl: "https://unstop.com",
+      applyUrl: "https://unstop.com",
+      date: "October 13, 2026 (Registration Deadline)",
+      description:
+        "Propose sustainable business models and green supply chain solutions in this national management competition. Compete through rigorous case analysis and presentation rounds.",
+      location: "IIM Trichy Campus & Virtual Rounds",
+      city: "Tiruchirappalli",
+      stateRegion: "Tamil Nadu",
+      tags: ["iim", "case-study", "green-energy", "esg", "consulting"],
+      sourceBadge: "Unstop",
+      platform: "Unstop",
+      prizePool: "₹50,000 Cash Pool & Merit Certificates",
+      ...istSlot(2, 10, 8),
+      registered: 1850,
+      capacity: 3000,
+    },
+    {
+      id: "evt-comstox-mock-trading",
+      title: "Comstox 3.0 — Mock Stock & Trading Challenge",
+      organizer: "SGTB Khalsa College, Delhi University",
+      stream: "Business & Management",
+      category: "Trading Challenge",
+      mode: "Hybrid",
+      region: "Delhi / NCR",
+      regionGroup: "Delhi / NCR",
+      feeInINR: 0,
+      feeINR: 0,
+      hostUrl: "https://unstop.com",
+      applyUrl: "https://unstop.com",
+      date: "October 12, 2026",
+      description:
+        "Simulate real-time equity portfolio trading and quantitative risk analysis in a live market environment. Test order book strategies against volatility spikes and financial news feeds.",
+      location: "SGTB Khalsa College & Online Simulation Terminal",
+      city: "Delhi",
+      stateRegion: "Delhi NCR",
+      tags: ["mock-stock", "trading", "finance", "du", "portfolio"],
+      sourceBadge: "Unstop",
+      platform: "Unstop",
+      prizePool: "₹35,000 Cash + Trading Mentorship",
+      ...istSlot(1, 9, 7),
+      registered: 1420,
+      capacity: 2500,
+    },
+    {
+      id: "evt-hult-prize-global-2027",
+      title: "Hult Prize Global Challenge 2027",
+      organizer: "Hult Prize Foundation",
+      stream: "Business & Management",
+      category: "Case Study",
+      mode: "Hybrid",
+      region: "Global / Online",
+      regionGroup: "Global / Online",
+      feeInINR: 0,
+      feeINR: 0,
+      hostUrl: "https://hultprize.org",
+      applyUrl: "https://hultprize.org",
+      date: "Registrations open Autumn 2026",
+      description:
+        "Known as the Nobel Prize for Students—create scalable social business ventures aligned with UN SDGs. Pitch for $1,000,000 USD in global seed capital to change the world.",
+      location: "Global On-Campus Editions & Regional Summits",
+      city: "Global / Virtual",
+      stateRegion: "Global",
+      tags: ["hult-prize", "social-enterprise", "sdgs", "startup", "venture"],
+      sourceBadge: "Virtual",
+      platform: "Hult Prize Portal",
+      prizePool: "$1,000,000 USD Global Seed Capital",
+      ...istSlot(8, 14, 10),
+      registered: 21000,
+      capacity: 50000,
+    },
+
+    /* --- 3. ARTS, DESIGN & HUMANITIES --- */
+    {
+      id: "evt-artribute-design-2026",
+      title: "ArTribute 2026 — Fine Arts & Digital Design",
+      organizer: "IIT Madras",
+      stream: "Arts, Design & Humanities",
+      category: "Competition",
+      mode: "Hybrid",
+      region: "All India",
+      regionGroup: "All India",
+      feeInINR: 99,
+      feeINR: 99,
+      hostUrl: "https://unstop.com",
+      applyUrl: "https://unstop.com",
+      date: "Open through November 9, 2026",
+      description:
+        "Showcase digital art, graphic design, and UI/UX branding concepts via asynchronous portfolio submission. Evaluated by renowned fine arts faculty and industry creative directors.",
+      location: "IIT Madras Saarang Arena & Online",
+      city: "Chennai",
+      stateRegion: "Tamil Nadu",
+      tags: ["iit-madras", "digital-art", "ui-ux", "graphic-design", "branding"],
+      sourceBadge: "Unstop",
+      platform: "Unstop",
+      prizePool: "₹40,000 Cash + Exhibition Showcase",
+      ...istSlot(10, 10, 6),
+      registered: 960,
+      capacity: 2000,
+    },
+    {
+      id: "evt-ad-mad-challenge-2026",
+      title: "Ad Mad Challenge 2026",
+      organizer: "Shaheed Rajguru College, Delhi University",
+      stream: "Arts, Design & Humanities",
+      category: "Competition",
+      mode: "Online",
+      region: "Delhi / NCR",
+      regionGroup: "Delhi / NCR",
+      feeInINR: 0,
+      feeINR: 0,
+      hostUrl: "https://unstop.com",
+      applyUrl: "https://unstop.com",
+      date: "October 12, 2026",
+      description:
+        "Pitch creative video ads, copy concepts, and branding strategy campaigns online. Deliver persuasive marketing narratives within strict time constraints.",
+      location: "SRCASW Portal (Online)",
+      city: "Delhi",
+      stateRegion: "Delhi NCR",
+      tags: ["ad-mad", "creative-writing", "video-ad", "marketing", "du"],
+      sourceBadge: "Unstop",
+      platform: "Unstop",
+      prizePool: "₹20,000 Cash & Brand Vouchers",
+      ...istSlot(1, 14, 5),
+      registered: 780,
+      capacity: 1500,
+    },
+
+    /* --- 4. BIOLOGY, CHEMISTRY & NATURAL SCIENCES --- */
+    {
+      id: "evt-enveda-casmi-2026",
+      title: "Enveda CASMI Computational Chemistry Challenge 2026",
+      organizer: "Enveda Biosciences & Kaggle",
+      stream: "Sciences & Mathematics",
+      category: "Competition",
+      mode: "Online",
+      region: "Global / Online",
+      regionGroup: "Global / Online",
+      feeInINR: 0,
+      feeINR: 0,
+      hostUrl: "https://kaggle.com",
+      applyUrl: "https://kaggle.com",
+      date: "Open through December 18, 2026",
+      description:
+        "Predict natural molecular structures from mass spectra using AI and biophysical informatics. Accelerate plant chemistry exploration and natural therapeutic discovery.",
+      location: "Kaggle Platform",
+      city: "Online",
+      stateRegion: "Global",
+      tags: ["computational-chemistry", "kaggle", "mass-spec", "bio-ai", "enveda"],
+      sourceBadge: "Kaggle",
+      platform: "Kaggle Platform",
+      prizePool: "$30,000 USD Kaggle Prize Pool",
+      ...istSlot(18, 12, 72),
+      registered: 3400,
+      capacity: 8000,
+    },
+    {
+      id: "evt-oneaquahealth-ieee-2026",
+      title: "OneAquaHealth IEEE Global Hackathon",
+      organizer: "IEEE",
+      stream: "Sciences & Mathematics",
+      category: "Hackathon",
+      mode: "Online",
+      region: "Global / Online",
+      regionGroup: "Global / Online",
+      feeInINR: 0,
+      feeINR: 0,
+      hostUrl: "https://ieee.org",
+      applyUrl: "https://ieee.org",
+      date: "Late October 2026",
+      description:
+        "Build virtual solutions for aquatic ecosystem conservation, water health, and environmental biology. Develop sensor networks and bio-surveillance tools for freshwater biodiversity.",
+      location: "IEEE Virtual Challenge Space",
+      city: "Online",
+      stateRegion: "Global",
+      tags: ["ieee", "marine-biology", "water-health", "ecology", "iot-sensors"],
+      sourceBadge: "IEEE",
+      platform: "IEEE Official Portal",
+      prizePool: "$15,000 USD IEEE Travel Grants & Prizes",
+      ...istSlot(6, 15, 24),
+      registered: 2300,
+      capacity: 5000,
+    },
+
+    /* --- 5. MATHEMATICS, PHYSICS & INTERDISCIPLINARY STEM --- */
+    {
+      id: "evt-arc-prize-agi-2026",
+      title: "ARC Prize 2026 — ARC-AGI-3 Challenge",
+      organizer: "ARC Prize Foundation & Kaggle",
+      stream: "Sciences & Mathematics",
+      category: "Competition",
+      mode: "Online",
+      region: "Global / Online",
+      regionGroup: "Global / Online",
+      feeInINR: 0,
+      feeINR: 0,
+      hostUrl: "https://arcprize.org",
+      applyUrl: "https://arcprize.org",
+      date: "Open through November 1, 2026",
+      description:
+        "Solve novel abstract mathematical logic and visual pattern-reasoning puzzles to advance artificial general intelligence. Measure out-of-distribution generalization across symbolic grids.",
+      location: "ARC Prize Portal & Kaggle",
+      city: "Online",
+      stateRegion: "Global",
+      tags: ["arc-prize", "agi", "mathematical-logic", "kaggle", "symbolic-reasoning"],
+      sourceBadge: "Kaggle",
+      platform: "ARC Prize Portal",
+      prizePool: "$1,100,000 USD Total Prize Pool",
+      ...istSlot(9, 13, 48),
+      registered: 6100,
+      capacity: 12000,
+    },
+    {
+      id: "evt-iymc-math-challenge-2026",
+      title: "International Youth Math Challenge (IYMC) 2026",
+      organizer: "IYMC Committee",
+      stream: "Sciences & Mathematics",
+      category: "Competition",
+      mode: "Online",
+      region: "Global / Online",
+      regionGroup: "Global / Online",
+      feeInINR: 0,
+      feeINR: 0,
+      hostUrl: "https://iymc.info",
+      applyUrl: "https://iymc.info",
+      date: "October – November 2026",
+      description:
+        "Worldwide math tournament testing creative problem-solving and mathematical proof skills. Compete individually across qualification, pre-final, and final rounds.",
+      location: "IYMC International Portal",
+      city: "Online",
+      stateRegion: "Global",
+      tags: ["iymc", "math-olympiad", "proofs", "number-theory", "combinatorics"],
+      sourceBadge: "Virtual",
+      platform: "IYMC Portal",
+      prizePool: "$700 USD Cash + Global Certificates",
+      ...istSlot(11, 10, 12),
+      registered: 8400,
+      capacity: 15000,
     },
   ];
 }
